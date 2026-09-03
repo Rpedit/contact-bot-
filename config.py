@@ -10,4 +10,4 @@ ADMIN_ID = int(os.environ.get("ADMIN_ID", "7067885693"))
 
 # Video & Button Links
 START_VIDEO = os.environ.get("START_VIDEO", "https://files.catbox.moe/v1quvp.mp4")
-BUTTON_URL = os.environ.get("BUTTON_URL", "https://t.me/ModularBot")
+BUTTON_URL = os.environ.get("BUTTON_URL", "https://t.me/+9TmHlCoc-U9lN2Q1")

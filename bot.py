@@ -309,18 +309,16 @@ async def user_to_admin(client: Client, message: Message):
     except Exception as e:
         return logger.error(f"Forward error: {e}")
 
-    # Card sirf tab aayega jab forward link NA ho AUR username bhi NA ho
+    # Agar user ka username NA ho AUR unka direct forward link bhi NA ho
     if not fwd.forward_from and not user.username:
         info_text = (
-            f"👆 Message sent by {user.first_name}!!**\n"
-            f"[{user.id}](tg://user?id={user.id}) #id{user.id}\n\n"
+            f"👆 Message sent by {user.first_name} [{user.id}](tg://user?id={user.id}) #id{user.id}\n"
             f"👉 To answer, reply to this message."
         )
-        profile_url = f"tg://openmessage?user_id={user.id}"
         card = await client.send_message(
             chat_id=OWNER_ID,
             text=info_text,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👤 User Profile", url=profile_url)]]),
+            reply_to_message_id=fwd.id,
             disable_web_page_preview=True,
         )
         msg_map[card.id] = user.id
@@ -332,7 +330,6 @@ async def user_to_admin(client: Client, message: Message):
 # --- Admin Reply to User ---
 @app.on_message(filters.private & filters.user(OWNER_ID) & filters.reply)
 async def admin_reply(client: Client, message: Message):
-    # Ignore admin commands
     if message.text and message.text.startswith(("/ban", "/unban", "/broadcast", "/stats")):
         return
 

@@ -14,110 +14,145 @@ from pyrogram.types import (
     BotCommand,
     BotCommandScopeChat,
     BotCommandScopeAllPrivateChats,
-    BotCommandScopeAllGroupChats,
-    ChatPermissions,
 )
-from config import API_ID, API_HASH, BOT_TOKEN, ADMINS, START_VIDEO, BUTTON_URL
+from config import API_ID, API_HASH, BOT_TOKEN, ADMIN_ID, START_VIDEO, BUTTON_URL
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-MASTER_ADMINS = [int(x) for x in ADMINS]
+MASTER_ADMIN = int(ADMIN_ID)
 active_clients = []
-user_languages = {}
-
-# ================= 1. SQLite Database Storage ================= #
 DB_FILE = "clones.db"
 
+# ================= 1. SQLite Storage ================= #
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("""
         CREATE TABLE IF NOT EXISTS clones (
             token TEXT PRIMARY KEY,
-            admin_id INTEGER
+            owner_id INTEGER,
+            start_text TEXT,
+            support_group_id INTEGER DEFAULT 0
         )
     """)
     c.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
-            name TEXT,
+        CREATE TABLE IF NOT EXISTS bot_users (
+            token TEXT,
+            user_id INTEGER,
+            first_name TEXT,
             username TEXT,
-            date_joined TEXT
+            joined_at TEXT,
+            PRIMARY KEY (token, user_id)
         )
     """)
     c.execute("""
-        CREATE TABLE IF NOT EXISTS groups (
-            chat_id INTEGER PRIMARY KEY,
-            title TEXT,
-            date_added TEXT
+        CREATE TABLE IF NOT EXISTS templates (
+            token TEXT,
+            keyword TEXT,
+            content TEXT,
+            PRIMARY KEY (token, keyword)
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS bans (
+            token TEXT,
+            user_id INTEGER,
+            PRIMARY KEY (token, user_id)
         )
     """)
     conn.commit()
     conn.close()
 
-def save_user(user_id: int, name: str, username: str):
+init_db()
+
+def db_save_user(token: str, user_id: int, name: str, username: str):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute(
-        "INSERT OR IGNORE INTO users (user_id, name, username, date_joined) VALUES (?, ?, ?, ?)",
-        (user_id, name, username, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        "INSERT OR IGNORE INTO bot_users VALUES (?, ?, ?, ?, ?)",
+        (token, user_id, name, username, datetime.now().strftime("%Y-%m-%d %H:%M")),
     )
     conn.commit()
     conn.close()
 
-def save_group(chat_id: int, title: str):
+def db_get_users(token: str):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute(
-        "INSERT OR IGNORE INTO groups (chat_id, title, date_added) VALUES (?, ?, ?)",
-        (chat_id, title, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-    )
-    conn.commit()
-    conn.close()
-
-def get_all_users():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("SELECT user_id FROM users")
+    c.execute("SELECT user_id FROM bot_users WHERE token = ?", (token,))
     users = [row[0] for row in c.fetchall()]
     conn.close()
     return users
 
-def get_db_stats():
+def db_set_start(token: str, text: str):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM users")
-    total_users = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM groups")
-    total_groups = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM clones")
-    total_clones = c.fetchone()[0]
-    conn.close()
-    return total_users, total_groups, total_clones
-
-def save_clone(token: str, admin_id: int):
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO clones (token, admin_id) VALUES (?, ?)", (token, admin_id))
+    c.execute("UPDATE clones SET start_text = ? WHERE token = ?", (text, token))
     conn.commit()
     conn.close()
 
-def get_clones():
+def db_get_start(token: str):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("SELECT token, admin_id FROM clones")
-    data = c.fetchall()
+    c.execute("SELECT start_text FROM clones WHERE token = ?", (token,))
+    res = c.fetchone()
     conn.close()
-    return data
+    return res[0] if res and res[0] else None
 
-init_db()
+def db_set_group(token: str, chat_id: int):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("UPDATE clones SET support_group_id = ? WHERE token = ?", (chat_id, token))
+    conn.commit()
+    conn.close()
+
+def db_get_group(token: str):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT support_group_id FROM clones WHERE token = ?", (token,))
+    res = c.fetchone()
+    conn.close()
+    return res[0] if res else 0
+
+def db_add_template(token: str, keyword: str, content: str):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO templates VALUES (?, ?, ?)", (token, keyword.lower(), content))
+    conn.commit()
+    conn.close()
+
+def db_get_template(token: str, keyword: str):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT content FROM templates WHERE token = ? AND keyword = ?", (token, keyword.lower()))
+    res = c.fetchone()
+    conn.close()
+    return res[0] if res else None
+
+def db_ban_user(token: str, user_id: int):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("INSERT OR IGNORE INTO bans VALUES (?, ?)", (token, user_id))
+    conn.commit()
+    conn.close()
+
+def db_unban_user(token: str, user_id: int):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("DELETE FROM bans WHERE token = ? AND user_id = ?", (token, user_id))
+    conn.commit()
+    conn.close()
+
+def db_is_banned(token: str, user_id: int) -> bool:
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM bans WHERE token = ? AND user_id = ?", (token, user_id))
+    banned = c.fetchone() is not None
+    conn.close()
+    return banned
 
 
-# ================= 2. Helper Functions ================= #
+# ================= 2. Helpers & Scoped Commands ================= #
 async def auto_delete(msg: Message, delay: int = 3):
     await asyncio.sleep(delay)
     try:
@@ -125,487 +160,207 @@ async def auto_delete(msg: Message, delay: int = 3):
     except Exception:
         pass
 
-async def setup_scoped_commands(client: Client, admin_id: int):
+async def set_modular_commands(client: Client, owner_id: int):
     try:
-        # 1. Normal Users Menu - Sirf /start show hoga
-        user_commands = [
-            BotCommand("start", "🤖 Start Bot"),
-        ]
-        await client.set_bot_commands(user_commands, scope=BotCommandScopeAllPrivateChats())
-
-        # 2. Group Chats Menu
-        group_commands = [
-            BotCommand("clean", "🧹 Purge chat messages"),
-            BotCommand("id", "🆔 Get Group / User ID"),
-            BotCommand("pin", "📌 Pin message"),
-            BotCommand("ban", "🚫 Ban user"),
-            BotCommand("unban", "✅ Unban user"),
-            BotCommand("mute", "🔇 Mute user"),
-            BotCommand("unmute", "🔊 Unmute user"),
-            BotCommand("kick", "👢 Kick user"),
-        ]
-        await client.set_bot_commands(group_commands, scope=BotCommandScopeAllGroupChats())
-
-        # 3. Admin & Clone Owner Menu (Admin ko saari commands dikhengi)
-        admin_commands = [
-            BotCommand("admin", "👑 Admin Dashboard"),
-            BotCommand("stats", "📊 Live Bot Stats"),
-            BotCommand("broadcast", "📢 Broadcast message"),
-            BotCommand("clean", "🧹 Wipe messages"),
-            BotCommand("ban", "🚫 Ban user"),
-            BotCommand("unban", "✅ Unban user"),
-            BotCommand("warn", "⚠️ Warn user"),
-            BotCommand("resetwarn", "🔄 Reset user warnings"),
-            BotCommand("start", "🤖 Restart bot"),
-            BotCommand("help", "❓ Help manual"),
-            BotCommand("lang", "🌍 Language"),
-            BotCommand("id", "🆔 Check ID"),
-        ]
-        await client.set_bot_commands(admin_commands, scope=BotCommandScopeChat(chat_id=admin_id))
+        # Users menu: Only Start & Privacy policy
+        await client.set_bot_commands(
+            [
+                BotCommand("start", "🤖 Start Bot"),
+                BotCommand("privacy", "🔒 Privacy & Policy"),
+            ],
+            scope=BotCommandScopeAllPrivateChats(),
+        )
+        # Admin menu: Full control commands
+        await client.set_bot_commands(
+            [
+                BotCommand("admin", "👑 Control Center"),
+                BotCommand("stats", "📊 Live Stats"),
+                BotCommand("setstart", "✏️ Edit Welcome Text"),
+                BotCommand("setgroup", "👥 Link Support Group"),
+                BotCommand("template", "⚡ Add Quick Template"),
+                BotCommand("broadcast", "📢 Send Message to All"),
+                BotCommand("ban", "🚫 Ban User"),
+                BotCommand("unban", "✅ Unban User"),
+                BotCommand("start", "🤖 Restart Bot"),
+            ],
+            scope=BotCommandScopeChat(chat_id=owner_id),
+        )
     except Exception as e:
         logger.warning(f"Scoped commands warning: {e}")
 
-def extract_target_user(message: Message, msg_map: dict) -> int | None:
-    if len(message.command) > 1 and message.command[1].lstrip("-").isdigit():
-        return int(message.command[1])
-
-    if message.reply_to_message:
-        replied = message.reply_to_message
-        if replied.from_user:
-            return replied.from_user.id
-        if replied.id in msg_map:
-            return msg_map[replied.id]
-        if replied.forward_from:
-            return replied.forward_from.id
-        text_content = replied.text or replied.caption or ""
-        match = re.search(r"#id(\d+)", text_content)
-        if match:
-            return int(match.group(1))
-
-    return None
+PRIVACY_TEXT = (
+    "🔒 **ModularBot Privacy & Data Policy**\n\n"
+    "• **Data Collected:** User ID, Name, aur Username sirf service operate karne ke liye save hota hai.\n"
+    "• **Relay Function:** User ke messages directly bot owner ya unke support group tak deliver hote hain.\n"
+    "• **GDPR Rights:** Aap apna account data delete karwane ke liye kisi bhi waqt owner se request kar sakte hain.\n"
+    "• **Third-Party Sharing:** Aapka personal data kisi company ya advertiser ke sath share nahi kiya jata."
+)
 
 
-# ================= 3. Core Engine Setup ================= #
-def setup_handlers(bot: Client, admin_id: int):
+# ================= 3. Core Handler Engine ================= #
+def setup_modular_handlers(bot: Client, owner_id: int, bot_token: str):
     msg_map = {}
-    banned_users = set()
-    user_warns = {}
 
-    # --- Group Auto-Tracker & Welcome ---
-    @bot.on_message(filters.new_chat_members)
-    async def group_welcome(client: Client, message: Message):
-        chat = message.chat
-        save_group(chat.id, chat.title)
+    @bot.on_message(filters.command("privacy") & filters.private)
+    async def privacy_cmd(client: Client, message: Message):
+        await message.reply_text(PRIVACY_TEXT)
 
-        for member in message.new_chat_members:
-            if member.is_self:
-                await message.reply_text(
-                    f"🎉 **Thanks for adding me to {chat.title}!**\n\n"
-                    "Mujhe group me **Admin** permissions dein taaki moderation aur chat clean features chal sakein.",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚡ Support", url=BUTTON_URL)]])
-                )
-            else:
-                card = f"👋 Welcome [{member.first_name}](tg://user?id={member.id}) to **{chat.title}**!"
-                del_msg = await message.reply_text(card)
-                asyncio.create_task(auto_delete(del_msg, delay=8))
-
-    # --- /clean & /purge (Chat Wiper) ---
-    @bot.on_message(filters.command(["clean", "purge", "clear"]) & filters.group)
-    async def clean_group_chat(client: Client, message: Message):
-        chat_id = message.chat.id
-        user = message.from_user
-
-        try:
-            member = await message.chat.get_member(user.id)
-            if not (member.privileges and member.privileges.can_delete_messages) and user.id != admin_id:
-                alert = await message.reply_text("⛔ Sirf group admins jinke paas 'Delete Messages' right hai ye use kar sakte hain!")
-                return asyncio.create_task(auto_delete(alert, 3))
-        except Exception:
-            return
-
-        status = await message.reply_text("🧹 **Messages delete ho rahe hain...**")
-
-        if message.reply_to_message:
-            from_msg_id = message.reply_to_message.id
-            to_msg_id = message.id
-            msg_ids = list(range(from_msg_id, to_msg_id + 1))
-            
-            total_deleted = 0
-            for i in range(0, len(msg_ids), 100):
-                batch = msg_ids[i:i + 100]
-                try:
-                    await client.delete_messages(chat_id, batch)
-                    total_deleted += len(batch)
-                except Exception:
-                    pass
-                await asyncio.sleep(0.1)
-
-            notice = await client.send_message(chat_id, f"✅ **Chat Cleaned!** `{total_deleted}` messages delete kar diye gaye.")
-            return asyncio.create_task(auto_delete(notice, 3))
-
-        limit = 100
-        if len(message.command) > 1 and message.command[1].isdigit():
-            limit = min(int(message.command[1]), 300)
-
-        msg_ids = []
-        async for msg in client.get_chat_history(chat_id, limit=limit):
-            msg_ids.append(msg.id)
-            if len(msg_ids) >= 100:
-                try:
-                    await client.delete_messages(chat_id, msg_ids)
-                except Exception:
-                    pass
-                msg_ids = []
-                await asyncio.sleep(0.1)
-
-        if msg_ids:
-            try:
-                await client.delete_messages(chat_id, msg_ids)
-            except Exception:
-                pass
-
-        try:
-            await status.delete()
-        except Exception:
-            pass
-
-        done_msg = await client.send_message(chat_id, f"🧹 **Group Cleaned!** Pichle `{limit}` messages saaf ho gaye.")
-        asyncio.create_task(auto_delete(done_msg, 3))
-
-    # --- /start Handler ---
     @bot.on_message(filters.command("start") & filters.private)
-    async def start_handler(client: Client, message: Message):
+    async def start_cmd(client: Client, message: Message):
         user = message.from_user
-        save_user(user.id, user.first_name, user.username or "")
-        me = await client.get_me()
+        db_save_user(bot_token, user.id, user.first_name, user.username or "")
+        custom_text = db_get_start(bot_token)
 
-        caption_text = (
-            f"HEY 👤 [**{user.first_name}**](tg://user?id={user.id}),\n\n"
-            f"I'M THE OWNER OF 🔍 **HD PRO SEARCH BOT**\n\n"
-            f"🎬 **NEW MOVIES / SERIES BOTS DEKHNA HO TO NICHE DIYE GAYE BUTTON PE CLICK KARE** 👇\n\n"
-            f"⚠️ **AEK SE BHI ZYADA FAST & ADVANCED MOVIE SEARCH BOTS AVAILABLE!**"
-        )
+        if not custom_text:
+            custom_text = (
+                f"HEY 👤 [**{user.first_name}**](tg://user?id={user.id}),\n\n"
+                f"Welcome to our Support & Contact Bot!\n"
+                f"Aap apna koi bhi message yahan bhej sakte hain."
+            )
 
         user_buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("⚡ Fast Movie Bots List ↗", url=BUTTON_URL)],
-            [InlineKeyboardButton("➕ Add Me to Your Group ↗", url=f"https://t.me/{me.username}?startgroup=true")],
-            [
-                InlineKeyboardButton("🚀 Clone Bot", callback_data="open_clone"),
-                InlineKeyboardButton("🌍 Language", callback_data="open_lang")
-            ],
-            [InlineKeyboardButton("❓ How to Use", callback_data="open_help")]
+            [InlineKeyboardButton("⚡ Channel / Updates ↗", url=BUTTON_URL)],
+            [InlineKeyboardButton("🔒 Privacy Policy", callback_data="show_privacy")],
         ])
 
         try:
-            await message.reply_video(video=START_VIDEO, caption=caption_text, reply_markup=user_buttons)
+            await message.reply_video(video=START_VIDEO, caption=custom_text, reply_markup=user_buttons)
         except Exception:
-            try:
-                await message.reply_animation(animation=START_VIDEO, caption=caption_text, reply_markup=user_buttons)
-            except Exception:
-                await message.reply_text(text=caption_text, reply_markup=user_buttons)
+            await message.reply_text(text=custom_text, reply_markup=user_buttons)
 
-        if user.id == admin_id:
-            admin_panel_text = (
-                "👆 This is the message your users will see.\n\n"
-                "👇 This is the message you see as an administrator.\n\n"
-                "👑 **You are the administrator of this bot!**"
+        if user.id == owner_id:
+            admin_panel = (
+                "👑 **ModularBot Administrator Setup**\n\n"
+                "• `/setstart <text>` - Naya start message set karein\n"
+                "• `/setgroup` - Messages group me mangwane ke liye support group me type karein\n"
+                "• `/template <word> <reply>` - Quick template banayein\n"
+                "• `/broadcast` - Sabhi users ko ek message forward karein\n"
+                "• `/admin` - Current statistics check karein"
             )
-            admin_buttons = InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("⚙️ Admin Panel", callback_data="admin_home"),
-                    InlineKeyboardButton("📊 Stats", callback_data="live_stats")
-                ],
-                [InlineKeyboardButton("🎧 Support ↗", url=BUTTON_URL)]
-            ])
-            await message.reply_text(admin_panel_text, reply_markup=admin_buttons)
+            await message.reply_text(admin_panel)
 
-    # --- /admin & /stats Handler ---
-    @bot.on_message(filters.command(["admin", "stats"]) & filters.private & filters.user(admin_id))
-    async def admin_panel_handler(client: Client, message: Message):
-        tot_u, tot_g, tot_c = get_db_stats()
-        panel_text = (
-            "👑 **Control Center Dashboard**\n\n"
-            f"👤 **Admin ID:** `{admin_id}`\n"
-            f"👥 **Total Registered Users:** `{tot_u}`\n"
-            f"🏢 **Total Active Groups:** `{tot_g}`\n"
-            f"🤖 **Total Dynamic Clones:** `{tot_c}`\n"
-            f"🚫 **Total Banned Users:** `{len(banned_users)}`\n"
-            f"⚠️ **Pending Warnings:** `{len(user_warns)}`"
+    @bot.on_message(filters.command("setstart") & filters.private & filters.user(owner_id))
+    async def set_start_cmd(client: Client, message: Message):
+        if len(message.command) < 2:
+            return await message.reply_text("⚠️ **Format:** `/setstart Welcome to my bot! Type your message.`")
+        new_text = message.text.split(None, 1)[1]
+        db_set_start(bot_token, new_text)
+        await message.reply_text("✅ **Custom Start Message update ho gaya!**")
+
+    @bot.on_message(filters.command("setgroup") & filters.group)
+    async def link_group_cmd(client: Client, message: Message):
+        if message.from_user.id != owner_id:
+            return await message.reply_text("⛔ Sirf bot owner ye command use kar sakta hai.")
+        db_set_group(bot_token, message.chat.id)
+        await message.reply_text(f"✅ **Linked!** Ab users ke saare messages is group me aayenge.")
+
+    @bot.on_message(filters.command("template") & filters.private & filters.user(owner_id))
+    async def template_cmd(client: Client, message: Message):
+        if len(message.command) < 3:
+            return await message.reply_text("⚠️ **Format:** `/template hi Hello! Main aapki kya madad kar sakta hoon?`")
+        keyword = message.command[1]
+        content = message.text.split(None, 2)[2]
+        db_add_template(bot_token, keyword, content)
+        await message.reply_text(f"✅ Template `# {keyword}` save ho gaya! Reply me `#{keyword}` likhne par ye send hoga.")
+
+    @bot.on_message(filters.command(["admin", "stats"]) & filters.private & filters.user(owner_id))
+    async def stats_cmd(client: Client, message: Message):
+        users = db_get_users(bot_token)
+        group_id = db_get_group(bot_token)
+        panel = (
+            "📊 **Modular Clone Analytics**\n\n"
+            f"👤 **Owner ID:** `{owner_id}`\n"
+            f"👥 **Total Users:** `{len(users)}`\n"
+            f"🏢 **Support Route:** `{group_id if group_id != 0 else 'Direct Private DM'}`\n\n"
+            "💬 User ko jawab dene ke liye uske message ya card par **Reply** karein."
         )
-        buttons = InlineKeyboardMarkup([
-            [
-                InlineKeyboardButton("📊 Live Stats", callback_data="live_stats"),
-                InlineKeyboardButton("📢 Broadcast", callback_data="start_bcast")
-            ],
-            [
-                InlineKeyboardButton("📋 Banned List", callback_data="show_banned"),
-                InlineKeyboardButton("⚙️ System Status", callback_data="system_info")
-            ],
-            [InlineKeyboardButton("❌ Close Panel", callback_data="close_panel")]
-        ])
-        await message.reply_text(panel_text, reply_markup=buttons)
+        await message.reply_text(panel)
 
-    # --- /broadcast Command ---
-    @bot.on_message(filters.command("broadcast") & filters.private & filters.user(admin_id))
-    async def broadcast_message(client: Client, message: Message):
+    @bot.on_message(filters.command("broadcast") & filters.private & filters.user(owner_id))
+    async def broadcast_cmd(client: Client, message: Message):
         if not message.reply_to_message and len(message.command) < 2:
-            await message.reply_text("⚠️ Message par reply karke `/broadcast` likhein.")
-            return
+            return await message.reply_text("⚠️ Message par reply karke `/broadcast` likhein.")
 
-        users = get_all_users()
+        users = db_get_users(bot_token)
         status = await message.reply_text(f"🚀 Broadcasting message to `{len(users)}` users...")
-        success, failed = 0, 0
+        success = 0
 
         for uid in users:
             try:
                 if message.reply_to_message:
                     await message.reply_to_message.copy(chat_id=uid)
                 else:
-                    broadcast_text = message.text.split(None, 1)[1]
-                    await client.send_message(chat_id=uid, text=broadcast_text)
+                    await client.send_message(chat_id=uid, text=message.text.split(None, 1)[1])
                 success += 1
                 await asyncio.sleep(0.05)
             except Exception:
-                failed += 1
+                pass
 
-        await status.edit_text(
-            f"✅ **Broadcast Finished!**\n\n"
-            f"🟢 **Sent:** `{success}`\n"
-            f"🔴 **Failed:** `{failed}`"
-        )
+        await status.edit_text(f"✅ **Broadcast Done!** `{success}/{len(users)}` users tak pahunch gaya.")
 
-    # --- /id Command ---
-    @bot.on_message(filters.command("id"))
-    async def get_id_details(client: Client, message: Message):
-        reply = message.reply_to_message
-        target = reply.from_user if reply else message.from_user
+    @bot.on_message(filters.command("ban") & (filters.private | filters.group))
+    async def ban_cmd(client: Client, message: Message):
+        if message.from_user.id != owner_id:
+            return
+        target_id = None
+        if len(message.command) > 1 and message.command[1].isdigit():
+            target_id = int(message.command[1])
+        elif message.reply_to_message and message.reply_to_message.id in msg_map:
+            target_id = msg_map[message.reply_to_message.id]
 
-        info = (
-            f"💬 **Chat ID:** `{message.chat.id}`\n"
-            f"👤 **User:** [{target.first_name}](tg://user?id={target.id})\n"
-            f"🆔 **User ID:** `{target.id}`\n"
-            f"🏷️ **Username:** @{target.username if target.username else 'None'}"
-        )
-        if reply:
-            info += f"\n📩 **Message ID:** `{reply.id}`"
-
-        await message.reply_text(info, disable_web_page_preview=True)
-
-    # --- Group Moderation Commands ---
-    @bot.on_message(filters.command("ban") & (filters.user(admin_id) | filters.group))
-    async def handle_ban(client: Client, message: Message):
-        if message.chat.type in ["group", "supergroup"]:
-            member = await message.chat.get_member(message.from_user.id)
-            if not member.privileges and message.from_user.id != admin_id:
-                return await message.reply_text("⛔ Sirf group admins ye command run kar sakte hain!")
-
-        target_id = extract_target_user(message, msg_map)
-        if not target_id:
-            return await message.reply_text("⚠️ User ID do ya kisi message par reply karein.")
-
-        if message.chat.type in ["group", "supergroup"]:
-            try:
-                await message.chat.ban_member(target_id)
-                await message.reply_text(f"🚫 User `[{target_id}]` group se **Ban** ho gaya.")
-            except Exception as e:
-                await message.reply_text(f"❌ Ban error: `{e}`")
+        if target_id:
+            db_ban_user(bot_token, target_id)
+            await message.reply_text(f"🚫 User `[{target_id}]` ban ho gaya.")
         else:
-            banned_users.add(target_id)
-            await message.reply_text(f"🚫 User `[{target_id}]` bot par **Ban** ho gaya.")
+            await message.reply_text("⚠️ User ID enter karein ya card par reply karein.")
 
-    @bot.on_message(filters.command("unban") & (filters.user(admin_id) | filters.group))
-    async def handle_unban(client: Client, message: Message):
-        target_id = extract_target_user(message, msg_map)
-        if not target_id:
-            return await message.reply_text("⚠️ User ID provide karein.")
-
-        if message.chat.type in ["group", "supergroup"]:
-            try:
-                await message.chat.unban_member(target_id)
-                await message.reply_text(f"✅ User `[{target_id}]` group me **Unban** ho gaya.")
-            except Exception as e:
-                await message.reply_text(f"❌ Unban error: `{e}`")
+    @bot.on_message(filters.command("unban") & (filters.private | filters.group))
+    async def unban_cmd(client: Client, message: Message):
+        if message.from_user.id != owner_id:
+            return
+        target_id = int(message.command[1]) if len(message.command) > 1 and message.command[1].isdigit() else None
+        if target_id:
+            db_unban_user(bot_token, target_id)
+            await message.reply_text(f"✅ User `[{target_id}]` unban ho gaya.")
         else:
-            if target_id in banned_users:
-                banned_users.remove(target_id)
-            await message.reply_text(f"✅ User `[{target_id}]` bot par **Unban** ho gaya.")
+            await message.reply_text("⚠️ Valid user ID enter karein.")
 
-    @bot.on_message(filters.command("mute") & filters.group)
-    async def handle_mute(client: Client, message: Message):
-        target_id = extract_target_user(message, msg_map)
-        if not target_id:
-            return await message.reply_text("⚠️ User ke message par reply karke `/mute` karein.")
-        try:
-            await message.chat.restrict_member(target_id, ChatPermissions(can_send_messages=False))
-            await message.reply_text(f"🔇 User `[{target_id}]` **Muted**.")
-        except Exception as e:
-            await message.reply_text(f"❌ Mute error: `{e}`")
-
-    @bot.on_message(filters.command("unmute") & filters.group)
-    async def handle_unmute(client: Client, message: Message):
-        target_id = extract_target_user(message, msg_map)
-        if not target_id:
-            return await message.reply_text("⚠️ User mention/reply karein.")
-        try:
-            await message.chat.restrict_member(
-                target_id,
-                ChatPermissions(
-                    can_send_messages=True,
-                    can_send_media_messages=True,
-                    can_send_other_messages=True,
-                    can_add_web_page_previews=True,
-                ),
-            )
-            await message.reply_text(f"🔊 User `[{target_id}]` **Unmuted**.")
-        except Exception as e:
-            await message.reply_text(f"❌ Unmute error: `{e}`")
-
-    @bot.on_message(filters.command("kick") & filters.group)
-    async def handle_kick(client: Client, message: Message):
-        target_id = extract_target_user(message, msg_map)
-        if not target_id:
-            return await message.reply_text("⚠️ User mention/reply karein.")
-        try:
-            await message.chat.ban_member(target_id)
-            await message.chat.unban_member(target_id)
-            await message.reply_text(f"👢 User `[{target_id}]` group se **Kicked**.")
-        except Exception as e:
-            await message.reply_text(f"❌ Kick error: `{e}`")
-
-    @bot.on_message(filters.command("pin") & filters.group)
-    async def handle_pin(client: Client, message: Message):
-        if not message.reply_to_message:
-            return await message.reply_text("📌 Jis message ko pin karna hai uspar reply karein.")
-        try:
-            await message.reply_to_message.pin()
-            notice = await message.reply_text("📌 **Message Pinned Successfully!**")
-            asyncio.create_task(auto_delete(notice, 4))
-        except Exception as e:
-            await message.reply_text(f"❌ Pin error: `{e}`")
-
-    @bot.on_message(filters.command("warn") & filters.user(admin_id))
-    async def warn_user(client: Client, message: Message):
-        target_id = extract_target_user(message, msg_map)
-        if not target_id:
-            return await message.reply_text("⚠️ User ID provide karein.")
-
-        user_warns[target_id] = user_warns.get(target_id, 0) + 1
-        cnt = user_warns[target_id]
-
-        if cnt >= 3:
-            banned_users.add(target_id)
-            user_warns.pop(target_id, None)
-            await message.reply_text(f"🚫 User `[{target_id}]` 3/3 warnings complete hone par ban ho gaya.")
-        else:
-            await message.reply_text(f"⚠️ User `[{target_id}]` warned: **{cnt}/3**")
-
-    # --- /help & /lang Handlers ---
-    @bot.on_message(filters.command("help") & filters.private)
-    async def help_command(client: Client, message: Message):
-        if message.from_user.id == admin_id:
-            help_text = (
-                "👑 **Admin Command Manual**\n\n"
-                "• `/admin` - Dashboard and system controls\n"
-                "• `/stats` - Live database metrics\n"
-                "• `/broadcast` - Announce to all private users\n"
-                "• `/clean` - Clean group chat messages\n"
-                "• `/ban`, `/unban`, `/warn` - User moderation"
-            )
-        else:
-            help_text = (
-                "🛠️ **User Manual**\n\n"
-                "• Yahan koi bhi message bhejein, support team ko forward ho jayega.\n"
-                "• `/id` - Apna Telegram ID dekhein.\n"
-                "• `/start` - Bot restart karein."
-            )
-        await message.reply_text(help_text)
-
-    @bot.on_message(filters.command("lang") & filters.private)
-    async def lang_command(client: Client, message: Message):
-        lang_buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("English 🇬🇧", callback_data="set_lang_en"), InlineKeyboardButton("हिन्दी 🇮🇳", callback_data="set_lang_hi")]
-        ])
-        await message.reply_text("🌍 **Select preferred language / भाषा चुनें:**", reply_markup=lang_buttons)
-
-    # --- Callback Handlers ---
     @bot.on_callback_query()
-    async def handle_callbacks(client: Client, query: CallbackQuery):
-        data = query.data
-        uid = query.from_user.id
-
-        if data == "open_clone":
-            clone_guide = (
-                "🚀 **Apna Bot Clone Kaise Karein?**\n\n"
-                "1. [@BotFather](https://t.me/BotFather) par jayein aur `/newbot` bhej kar bot banayein.\n"
-                "2. Wahan se milne wala **API Token** copy karein.\n"
-                "3. Is bot me aakar ye command bhejein:\n\n"
-                "👉 `/clone AAPKA_BOT_TOKEN`\n\n"
-                "Aapka naya bot turant activate ho jayega aur aap uske owner ban jayenge!"
-            )
-            await query.message.reply_text(clone_guide, disable_web_page_preview=True)
+    async def callback_query(client: Client, query: CallbackQuery):
+        if query.data == "show_privacy":
+            await query.message.reply_text(PRIVACY_TEXT)
             await query.answer()
-        elif data == "open_lang":
-            await query.message.reply_text(
-                "🌍 **Select language:**",
-                reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("English 🇬🇧", callback_data="set_lang_en"), InlineKeyboardButton("हिन्दी 🇮🇳", callback_data="set_lang_hi")]
-                ])
-            )
-            await query.answer()
-        elif data == "open_help":
-            await query.answer()
-            await query.message.reply_text("❓ Koi bhi message yahan likhkar bhejein, support team aapse direct connect karegi.")
-        elif data == "set_lang_en":
-            user_languages[uid] = "en"
-            await query.answer("Language set to English!", show_alert=True)
-        elif data == "set_lang_hi":
-            user_languages[uid] = "hi"
-            await query.answer("भाषा हिन्दी सेट हो गई है!", show_alert=True)
-        elif data == "live_stats":
-            tot_u, tot_g, tot_c = get_db_stats()
-            await query.answer(f"Users: {tot_u} | Groups: {tot_g} | Clones: {tot_c}", show_alert=True)
-        elif data == "start_bcast":
-            await query.answer("Kisi message par reply karke /broadcast likhein.", show_alert=True)
-        elif data == "show_banned":
-            if not banned_users:
-                await query.answer("Ban list khali hai.", show_alert=True)
-            else:
-                b_list = "\n".join([f"`{x}`" for x in banned_users])
-                await query.message.reply_text(f"🚫 **Current Banned Users:**\n\n{b_list}")
-                await query.answer()
-        elif data == "system_info":
-            await query.answer("Engine: Pyrogram v2\nStorage: SQLite\nKeep-Alive: Active 24/7", show_alert=True)
-        elif data == "close_panel":
-            await query.message.delete()
         else:
             await query.answer()
 
-    # --- User to Admin Private Forwarding ---
-    @bot.on_message(filters.private & ~filters.user(admin_id) & ~filters.command(["start", "help", "admin", "lang", "id", "broadcast", "clone"]))
-    async def user_forward_handler(client: Client, message: Message):
+    # --- User Messages (Relay to Owner or Linked Group) ---
+    @bot.on_message(filters.private & ~filters.user(owner_id) & ~filters.command(["start", "privacy"]))
+    async def forward_relay(client: Client, message: Message):
         user = message.from_user
-        save_user(user.id, user.first_name, user.username or "")
-
-        if user.id in banned_users:
-            notice = await message.reply_text("🚫 **Aapko is bot par ban kiya gaya hai.**")
+        if db_is_banned(bot_token, user.id):
+            notice = await message.reply_text("🚫 **Aapko is bot par block kiya gaya hai.**")
             return asyncio.create_task(auto_delete(notice, 4))
 
+        destination_chat = db_get_group(bot_token)
+        if destination_chat == 0:
+            destination_chat = owner_id
+
         try:
-            fwd = await message.forward(admin_id)
+            fwd = await message.forward(destination_chat)
             msg_map[fwd.id] = user.id
         except Exception as e:
             return logger.error(f"Forward error: {e}")
 
         info_text = (
-            f"📢 **Message sent by {user.first_name}!!**\n"
+            f"📢 **Message from {user.first_name}!!**\n"
             f"[{user.id}](tg://user?id={user.id}) #id{user.id}\n\n"
-            f"👉 To answer, reply to this message."
+            f"👉 Reply to this message to answer."
         )
         profile_url = f"https://t.me/{user.username}" if user.username else f"tg://openmessage?user_id={user.id}"
         card = await client.send_message(
-            chat_id=admin_id,
+            chat_id=destination_chat,
             text=info_text,
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👤 User profile", url=profile_url)]]),
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👤 User Profile", url=profile_url)]]),
             disable_web_page_preview=True,
         )
         msg_map[card.id] = user.id
@@ -613,78 +368,91 @@ def setup_handlers(bot: Client, admin_id: int):
         confirm = await message.reply_text("Message sent! ⏱️")
         asyncio.create_task(auto_delete(confirm, 3))
 
-    # --- Admin to User Reply ---
-    @bot.on_message(filters.private & filters.user(admin_id) & filters.reply)
-    async def reply_handler(client: Client, message: Message):
-        target = msg_map.get(message.reply_to_message.id)
-        if not target and message.reply_to_message.text:
+    # --- Admin Reply & Quick Template Expansion ---
+    @bot.on_message((filters.private | filters.group) & filters.reply)
+    async def reply_relay(client: Client, message: Message):
+        if message.chat.type == "private" and message.from_user.id != owner_id:
+            return
+
+        target_id = msg_map.get(message.reply_to_message.id)
+        if not target_id and message.reply_to_message.text:
             match = re.search(r"#id(\d+)", message.reply_to_message.text)
             if match:
-                target = int(match.group(1))
+                target_id = int(match.group(1))
 
-        if target:
+        if not target_id:
+            return
+
+        # Template quick answer check (#keyword)
+        msg_text = message.text or message.caption or ""
+        if msg_text.startswith("#"):
+            keyword = msg_text[1:].strip().split()[0]
+            template_content = db_get_template(bot_token, keyword)
+            if template_content:
+                await client.send_message(chat_id=target_id, text=template_content)
+                await message.reply_text(f"⚡ Template `#{keyword}` sent to user!")
+                return
+
+        try:
+            await message.copy(chat_id=target_id)
             try:
-                await message.copy(chat_id=target)
-                try:
-                    await client.send_reaction(chat_id=admin_id, message_id=message.id, emoji="👍")
-                except Exception:
-                    pass
-            except Exception as e:
-                await message.reply_text(f"❌ Delivery fail: `{e}`")
-        else:
-            await message.reply_text("⚠️ User ID nahi mili. User card ya forwarded msg par reply karein.")
+                await client.send_reaction(chat_id=message.chat.id, message_id=message.id, emoji="👍")
+            except Exception:
+                pass
+        except Exception as e:
+            await message.reply_text(f"❌ Send fail: `{e}`")
 
-    # --- Non-Reply Admin Warning ---
+    # --- Non-Reply Warning ---
     @bot.on_message(
-        filters.private 
-        & filters.user(admin_id) 
-        & ~filters.reply 
-        & ~filters.command(["start", "admin", "help", "lang", "ban", "unban", "warn", "resetwarn", "clone", "broadcast", "stats", "id"])
+        filters.private
+        & filters.user(owner_id)
+        & ~filters.reply
+        & ~filters.command(["start", "admin", "privacy", "help", "setstart", "setgroup", "template", "broadcast", "ban", "unban", "stats"])
     )
-    async def admin_no_reply_alert(client: Client, message: Message):
+    async def no_reply_alert(client: Client, message: Message):
         alert = await message.reply_text("⚠️ _Reply to a forwarded message to send a message to that user._")
         asyncio.create_task(auto_delete(alert, delay=4))
 
 
-# ================= 4. Master Bot & Dynamic Cloning ================= #
-master_bot = Client(
-    "master_bot_session",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN,
-)
-setup_handlers(master_bot, MASTER_ADMINS[0])
+# ================= 4. Master Bot System ================= #
+master_bot = Client("modular_master", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+setup_modular_handlers(master_bot, MASTER_ADMIN, BOT_TOKEN)
 
 @master_bot.on_message(filters.command("clone") & filters.private)
-async def clone_bot_command(client: Client, message: Message):
+async def master_clone_command(client: Client, message: Message):
     if len(message.command) < 2:
-        return await message.reply_text("⚠️ Token missing!\nUsage: `/clone 123456789:ABCdef...`")
+        return await message.reply_text("⚠️ **Format:** `/clone <BOT_TOKEN>`")
 
     token = message.command[1].strip()
-    status_msg = await message.reply_text("🔄 Token verify karke naya instance load ho raha hai...")
+    wait_msg = await message.reply_text("🔄 Token verify karke instance create kiya ja raha hai...")
 
-    new_bot = Client(f"clone_{token[:10]}", api_id=API_ID, api_hash=API_HASH, bot_token=token)
-    setup_handlers(new_bot, message.from_user.id)
+    new_clone = Client(f"clone_{token[:10]}", api_id=API_ID, api_hash=API_HASH, bot_token=token)
+    setup_modular_handlers(new_clone, message.from_user.id, token)
 
     try:
-        await new_bot.start()
-        await setup_scoped_commands(new_bot, message.from_user.id)
-        bot_info = await new_bot.get_me()
-        save_clone(token, message.from_user.id)
-        active_clients.append(new_bot)
-        await status_msg.edit_text(
-            f"✅ **Bot Cloned Successfully!**\n\n"
-            f"🤖 **Bot:** @{bot_info.username}\n"
+        await new_clone.start()
+        await set_modular_commands(new_clone, message.from_user.id)
+        bot_me = await new_clone.get_me()
+
+        conn = sqlite3.connect(DB_FILE)
+        conn.cursor().execute("INSERT OR REPLACE INTO clones (token, owner_id) VALUES (?, ?)", (token, message.from_user.id))
+        conn.commit()
+        conn.close()
+
+        active_clients.append(new_clone)
+        await wait_msg.edit_text(
+            f"✅ **Modular Bot Deployed!**\n\n"
+            f"🤖 **Bot:** @{bot_me.username}\n"
             f"👑 **Owner:** `{message.from_user.id}`\n\n"
-            f"Aapko is bot ke admin commands mil chuke hain. Apne naye bot par `/start` karein!"
+            f"Apne bot par jayein aur `/start` karein!"
         )
     except Exception as e:
-        await status_msg.edit_text(f"❌ Failed to launch clone:\n`{e}`")
+        await wait_msg.edit_text(f"❌ Failed to launch clone: `{e}`")
 
 
-# ================= 5. Web Server & Lifecycle ================= #
+# ================= 5. Server Lifecycle & Runner ================= #
 async def web_handler(request):
-    return web.Response(text="Kasuki Multi-Bot Engine Running 24/7!")
+    return web.Response(text="Modular Engine is running 24/7!")
 
 async def start_services():
     server = web.Application()
@@ -693,27 +461,30 @@ async def start_services():
     await runner.setup()
     port = int(os.environ.get("PORT", 8080))
     await web.TCPSite(runner, "0.0.0.0", port).start()
-    logger.info(f"Keep-Alive Server port {port} active.")
 
     await master_bot.start()
-    await setup_scoped_commands(master_bot, MASTER_ADMINS[0])
+    await set_modular_commands(master_bot, MASTER_ADMIN)
     active_clients.append(master_bot)
-    logger.info("Master bot active!")
+    logger.info("Modular Master live!")
 
-    saved_clones = get_clones()
-    for token, admin_id in saved_clones:
+    conn = sqlite3.connect(DB_FILE)
+    clones = conn.cursor().execute("SELECT token, owner_id FROM clones").fetchall()
+    conn.close()
+
+    for token, owner_id in clones:
+        if token == BOT_TOKEN:
+            continue
         try:
-            clone_client = Client(f"clone_{token[:10]}", api_id=API_ID, api_hash=API_HASH, bot_token=token)
-            setup_handlers(clone_client, admin_id)
-            await clone_client.start()
-            await setup_scoped_commands(clone_client, admin_id)
-            active_clients.append(clone_client)
-            logger.info(f"Loaded clone for admin {admin_id}")
+            c = Client(f"clone_{token[:10]}", api_id=API_ID, api_hash=API_HASH, bot_token=token)
+            setup_modular_handlers(c, owner_id, token)
+            await c.start()
+            await set_modular_commands(c, owner_id)
+            active_clients.append(c)
+            logger.info(f"Loaded clone for owner {owner_id}")
         except Exception as e:
             logger.error(f"Clone recovery error: {e}")
 
     await idle()
-
     for c in active_clients:
         await c.stop()
 

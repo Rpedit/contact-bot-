@@ -275,7 +275,7 @@ async def callback_handler(client: Client, query: CallbackQuery):
     await query.answer()
 
 
-# ================= 6. Relay System (Public vs Private Forward Detection) ================= #
+# ================= 6. Relay System ================= #
 @app.on_message(filters.private & ~filters.user(OWNER_ID) & ~filters.command(["start", "privacy"]))
 async def user_to_admin(client: Client, message: Message):
     user = message.from_user
@@ -309,14 +309,14 @@ async def user_to_admin(client: Client, message: Message):
     except Exception as e:
         return logger.error(f"Forward error: {e}")
 
-    # AGAR ACCOUNT PRIVATE HAI (forward_from None hai) TABHI EXTRA CARD AAYEGA:
-    if not fwd.forward_from:
+    # Card sirf tab aayega jab forward link NA ho AUR username bhi NA ho
+    if not fwd.forward_from and not user.username:
         info_text = (
             f"📢 **Message from {user.first_name}!!**\n"
             f"[{user.id}](tg://user?id={user.id}) #id{user.id}\n\n"
             f"👉 Reply to this message to answer."
         )
-        profile_url = f"https://t.me/{user.username}" if user.username else f"tg://openmessage?user_id={user.id}"
+        profile_url = f"tg://openmessage?user_id={user.id}"
         card = await client.send_message(
             chat_id=OWNER_ID,
             text=info_text,

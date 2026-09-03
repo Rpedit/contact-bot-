@@ -12,6 +12,9 @@ from pyrogram.types import (
     InlineKeyboardButton,
     CallbackQuery,
     BotCommand,
+    BotCommandScopeChat,
+    BotCommandScopeAllPrivateChats,
+    BotCommandScopeAllGroupChats,
     ChatPermissions,
 )
 from config import API_ID, API_HASH, BOT_TOKEN, ADMINS, START_VIDEO, BUTTON_URL
@@ -122,26 +125,45 @@ async def auto_delete(msg: Message, delay: int = 3):
     except Exception:
         pass
 
-async def register_bot_commands(client: Client):
+async def setup_scoped_commands(client: Client, admin_id: int):
     try:
-        await client.set_bot_commands([
-            BotCommand("start", "🤖 Restart bot"),
-            BotCommand("admin", "👑 Admin panel"),
-            BotCommand("clean", "🧹 Delete group chat"),
-            BotCommand("broadcast", "📢 Send msg to users"),
-            BotCommand("stats", "📊 Live database stats"),
-            BotCommand("help", "❓ How to use"),
-            BotCommand("lang", "🌍 Change language"),
-            BotCommand("id", "🆔 Get Chat / User ID"),
+        # 1. Normal Users Menu - Sirf /start show hoga
+        user_commands = [
+            BotCommand("start", "🤖 Start Bot"),
+        ]
+        await client.set_bot_commands(user_commands, scope=BotCommandScopeAllPrivateChats())
+
+        # 2. Group Chats Menu
+        group_commands = [
+            BotCommand("clean", "🧹 Purge chat messages"),
+            BotCommand("id", "🆔 Get Group / User ID"),
+            BotCommand("pin", "📌 Pin message"),
             BotCommand("ban", "🚫 Ban user"),
             BotCommand("unban", "✅ Unban user"),
             BotCommand("mute", "🔇 Mute user"),
             BotCommand("unmute", "🔊 Unmute user"),
             BotCommand("kick", "👢 Kick user"),
-            BotCommand("pin", "📌 Pin message"),
-        ])
+        ]
+        await client.set_bot_commands(group_commands, scope=BotCommandScopeAllGroupChats())
+
+        # 3. Admin & Clone Owner Menu (Admin ko saari commands dikhengi)
+        admin_commands = [
+            BotCommand("admin", "👑 Admin Dashboard"),
+            BotCommand("stats", "📊 Live Bot Stats"),
+            BotCommand("broadcast", "📢 Broadcast message"),
+            BotCommand("clean", "🧹 Wipe messages"),
+            BotCommand("ban", "🚫 Ban user"),
+            BotCommand("unban", "✅ Unban user"),
+            BotCommand("warn", "⚠️ Warn user"),
+            BotCommand("resetwarn", "🔄 Reset user warnings"),
+            BotCommand("start", "🤖 Restart bot"),
+            BotCommand("help", "❓ Help manual"),
+            BotCommand("lang", "🌍 Language"),
+            BotCommand("id", "🆔 Check ID"),
+        ]
+        await client.set_bot_commands(admin_commands, scope=BotCommandScopeChat(chat_id=admin_id))
     except Exception as e:
-        logger.warning(f"Command registration warning: {e}")
+        logger.warning(f"Scoped commands warning: {e}")
 
 def extract_target_user(message: Message, msg_map: dict) -> int | None:
     if len(message.command) > 1 and message.command[1].lstrip("-").isdigit():
@@ -169,7 +191,7 @@ def setup_handlers(bot: Client, admin_id: int):
     banned_users = set()
     user_warns = {}
 
-    # --- Group Auto Tracker & Welcome Card ---
+    # --- Group Auto-Tracker & Welcome ---
     @bot.on_message(filters.new_chat_members)
     async def group_welcome(client: Client, message: Message):
         chat = message.chat
@@ -179,7 +201,7 @@ def setup_handlers(bot: Client, admin_id: int):
             if member.is_self:
                 await message.reply_text(
                     f"🎉 **Thanks for adding me to {chat.title}!**\n\n"
-                    "Mujhe group me **Admin** permissions dein taaki moderation aur chat clean features smoothly chalein.",
+                    "Mujhe group me **Admin** permissions dein taaki moderation aur chat clean features chal sakein.",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⚡ Support", url=BUTTON_URL)]])
                 )
             else:
@@ -187,7 +209,7 @@ def setup_handlers(bot: Client, admin_id: int):
                 del_msg = await message.reply_text(card)
                 asyncio.create_task(auto_delete(del_msg, delay=8))
 
-    # --- /clean & /purge Command (Group Chat Wiper) ---
+    # --- /clean & /purge (Chat Wiper) ---
     @bot.on_message(filters.command(["clean", "purge", "clear"]) & filters.group)
     async def clean_group_chat(client: Client, message: Message):
         chat_id = message.chat.id
@@ -203,7 +225,6 @@ def setup_handlers(bot: Client, admin_id: int):
 
         status = await message.reply_text("🧹 **Messages delete ho rahe hain...**")
 
-        # Range purge if replied to a previous message
         if message.reply_to_message:
             from_msg_id = message.reply_to_message.id
             to_msg_id = message.id
@@ -222,7 +243,6 @@ def setup_handlers(bot: Client, admin_id: int):
             notice = await client.send_message(chat_id, f"✅ **Chat Cleaned!** `{total_deleted}` messages delete kar diye gaye.")
             return asyncio.create_task(auto_delete(notice, 3))
 
-        # Bulk purge by count (e.g., /clean 50 or default 100)
         limit = 100
         if len(message.command) > 1 and message.command[1].isdigit():
             limit = min(int(message.command[1]), 300)
@@ -252,7 +272,7 @@ def setup_handlers(bot: Client, admin_id: int):
         done_msg = await client.send_message(chat_id, f"🧹 **Group Cleaned!** Pichle `{limit}` messages saaf ho gaye.")
         asyncio.create_task(auto_delete(done_msg, 3))
 
-    # --- /start Handler (Private) ---
+    # --- /start Handler ---
     @bot.on_message(filters.command("start") & filters.private)
     async def start_handler(client: Client, message: Message):
         user = message.from_user
@@ -268,8 +288,9 @@ def setup_handlers(bot: Client, admin_id: int):
 
         user_buttons = InlineKeyboardMarkup([
             [InlineKeyboardButton("⚡ Fast Movie Bots List ↗", url=BUTTON_URL)],
+            [InlineKeyboardButton("➕ Add Me to Your Group ↗", url=f"https://t.me/{me.username}?startgroup=true")],
             [
-                InlineKeyboardButton("➕ Add Me to Your Group", url=f"https://t.me/{me.username}?startgroup=true"),
+                InlineKeyboardButton("🚀 Clone Bot", callback_data="open_clone"),
                 InlineKeyboardButton("🌍 Language", callback_data="open_lang")
             ],
             [InlineKeyboardButton("❓ How to Use", callback_data="open_help")]
@@ -328,7 +349,7 @@ def setup_handlers(bot: Client, admin_id: int):
     @bot.on_message(filters.command("broadcast") & filters.private & filters.user(admin_id))
     async def broadcast_message(client: Client, message: Message):
         if not message.reply_to_message and len(message.command) < 2:
-            await message.reply_text("⚠️ Kisi message par reply karke `/broadcast` likhein ya text include karein.")
+            await message.reply_text("⚠️ Message par reply karke `/broadcast` likhein.")
             return
 
         users = get_all_users()
@@ -370,7 +391,7 @@ def setup_handlers(bot: Client, admin_id: int):
 
         await message.reply_text(info, disable_web_page_preview=True)
 
-    # --- Group Moderation Suite ---
+    # --- Group Moderation Commands ---
     @bot.on_message(filters.command("ban") & (filters.user(admin_id) | filters.group))
     async def handle_ban(client: Client, message: Message):
         if message.chat.type in ["group", "supergroup"]:
@@ -481,20 +502,22 @@ def setup_handlers(bot: Client, admin_id: int):
     # --- /help & /lang Handlers ---
     @bot.on_message(filters.command("help") & filters.private)
     async def help_command(client: Client, message: Message):
-        help_text = (
-            "🛠️ **Command Manual**\n\n"
-            "**👤 Private Use:**\n"
-            "• Koi bhi message direct type karke bhejein, admin ko forward hoga.\n"
-            "• `/id` - Chat aur account details check karein.\n"
-            "• `/lang` - Apni language choose karein.\n\n"
-            "**🏢 Group Moderation:**\n"
-            "• `/clean <count>` ya Reply par `/purge` - Chat bulk delete\n"
-            "• `/ban`, `/unban`, `/mute`, `/unmute`, `/kick`, `/pin`\n\n"
-            "**👑 Owner Tools:**\n"
-            "• `/admin` - Control Dashboard\n"
-            "• `/broadcast` - All users announcement\n"
-            "• `/clone <token>` - Create custom instance"
-        )
+        if message.from_user.id == admin_id:
+            help_text = (
+                "👑 **Admin Command Manual**\n\n"
+                "• `/admin` - Dashboard and system controls\n"
+                "• `/stats` - Live database metrics\n"
+                "• `/broadcast` - Announce to all private users\n"
+                "• `/clean` - Clean group chat messages\n"
+                "• `/ban`, `/unban`, `/warn` - User moderation"
+            )
+        else:
+            help_text = (
+                "🛠️ **User Manual**\n\n"
+                "• Yahan koi bhi message bhejein, support team ko forward ho jayega.\n"
+                "• `/id` - Apna Telegram ID dekhein.\n"
+                "• `/start` - Bot restart karein."
+            )
         await message.reply_text(help_text)
 
     @bot.on_message(filters.command("lang") & filters.private)
@@ -510,7 +533,18 @@ def setup_handlers(bot: Client, admin_id: int):
         data = query.data
         uid = query.from_user.id
 
-        if data == "open_lang":
+        if data == "open_clone":
+            clone_guide = (
+                "🚀 **Apna Bot Clone Kaise Karein?**\n\n"
+                "1. [@BotFather](https://t.me/BotFather) par jayein aur `/newbot` bhej kar bot banayein.\n"
+                "2. Wahan se milne wala **API Token** copy karein.\n"
+                "3. Is bot me aakar ye command bhejein:\n\n"
+                "👉 `/clone AAPKA_BOT_TOKEN`\n\n"
+                "Aapka naya bot turant activate ho jayega aur aap uske owner ban jayenge!"
+            )
+            await query.message.reply_text(clone_guide, disable_web_page_preview=True)
+            await query.answer()
+        elif data == "open_lang":
             await query.message.reply_text(
                 "🌍 **Select language:**",
                 reply_markup=InlineKeyboardMarkup([
@@ -531,13 +565,13 @@ def setup_handlers(bot: Client, admin_id: int):
             tot_u, tot_g, tot_c = get_db_stats()
             await query.answer(f"Users: {tot_u} | Groups: {tot_g} | Clones: {tot_c}", show_alert=True)
         elif data == "start_bcast":
-            await query.answer("Reply to any message with /broadcast to start.", show_alert=True)
+            await query.answer("Kisi message par reply karke /broadcast likhein.", show_alert=True)
         elif data == "show_banned":
             if not banned_users:
                 await query.answer("Ban list khali hai.", show_alert=True)
             else:
                 b_list = "\n".join([f"`{x}`" for x in banned_users])
-                await query.message.reply_text(f"🚫 **Banned Users:**\n\n{b_list}")
+                await query.message.reply_text(f"🚫 **Current Banned Users:**\n\n{b_list}")
                 await query.answer()
         elif data == "system_info":
             await query.answer("Engine: Pyrogram v2\nStorage: SQLite\nKeep-Alive: Active 24/7", show_alert=True)
@@ -547,7 +581,7 @@ def setup_handlers(bot: Client, admin_id: int):
             await query.answer()
 
     # --- User to Admin Private Forwarding ---
-    @bot.on_message(filters.private & ~filters.user(admin_id) & ~filters.command(["start", "help", "admin", "lang", "id", "broadcast"]))
+    @bot.on_message(filters.private & ~filters.user(admin_id) & ~filters.command(["start", "help", "admin", "lang", "id", "broadcast", "clone"]))
     async def user_forward_handler(client: Client, message: Message):
         user = message.from_user
         save_user(user.id, user.first_name, user.username or "")
@@ -634,7 +668,7 @@ async def clone_bot_command(client: Client, message: Message):
 
     try:
         await new_bot.start()
-        await register_bot_commands(new_bot)
+        await setup_scoped_commands(new_bot, message.from_user.id)
         bot_info = await new_bot.get_me()
         save_clone(token, message.from_user.id)
         active_clients.append(new_bot)
@@ -642,7 +676,7 @@ async def clone_bot_command(client: Client, message: Message):
             f"✅ **Bot Cloned Successfully!**\n\n"
             f"🤖 **Bot:** @{bot_info.username}\n"
             f"👑 **Owner:** `{message.from_user.id}`\n\n"
-            f"Group moderation, chat wiper, live stats, aur forwarding commands live ho chuke hain!"
+            f"Aapko is bot ke admin commands mil chuke hain. Apne naye bot par `/start` karein!"
         )
     except Exception as e:
         await status_msg.edit_text(f"❌ Failed to launch clone:\n`{e}`")
@@ -662,7 +696,7 @@ async def start_services():
     logger.info(f"Keep-Alive Server port {port} active.")
 
     await master_bot.start()
-    await register_bot_commands(master_bot)
+    await setup_scoped_commands(master_bot, MASTER_ADMINS[0])
     active_clients.append(master_bot)
     logger.info("Master bot active!")
 
@@ -672,7 +706,7 @@ async def start_services():
             clone_client = Client(f"clone_{token[:10]}", api_id=API_ID, api_hash=API_HASH, bot_token=token)
             setup_handlers(clone_client, admin_id)
             await clone_client.start()
-            await register_bot_commands(clone_client)
+            await setup_scoped_commands(clone_client, admin_id)
             active_clients.append(clone_client)
             logger.info(f"Loaded clone for admin {admin_id}")
         except Exception as e:

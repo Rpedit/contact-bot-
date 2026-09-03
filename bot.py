@@ -1,88 +1,144 @@
+import os
 import re
+import asyncio
+from aiohttp import web
 from pyrogram import Client, filters
-from pyrogram.types import Message
-from config import API_ID, API_HASH, BOT_TOKEN, ADMIN_ID
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from config import API_ID, API_HASH, BOT_TOKEN, ADMIN_ID, START_VIDEO, BUTTON_URL
 
 app = Client(
-    "report_bot",
+    "contact_relay_bot",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN
 )
 
-# Admin message ID aur User ID ko memory me link karne ke liye
-report_db = {}
+# Admin msg ID aur User ID ka mapping memory store
+msg_map = {}
 
 
-# --- /start Command ---
+# ================= 1. /start Handler ================= #
 @app.on_message(filters.command("start") & filters.private)
-async def start_cmd(client: Client, message: Message):
-    if message.from_user.id == ADMIN_ID:
-        await message.reply_text(
-            "👑 **Admin Control Active!**\n\n"
-            "Jab koi user issue ya report bhejega, wo yahan aayega.\n"
-            "Aapko bas us report message par **Swipe / Reply** karna hai."
-        )
-    else:
-        await message.reply_text(
-            "👋 **Namaste!**\n\n"
-            "Aapko jo bhi issue, query ya report bhejni hai, yahan message ya photo/video ke sath bhej dijiye.\n"
-            "Humari team jald hi check karke aapko reply karegi."
-        )
-
-
-# --- User Incoming Report (User -> Admin) ---
-@app.on_message(filters.private & ~filters.user(ADMIN_ID))
-async def handle_user_report(client: Client, message: Message):
+async def start_handler(client: Client, message: Message):
     user = message.from_user
-    username = f"@{user.username}" if user.username else "No Username"
-    user_info = f"👤 **From:** {user.first_name} ({username})\n🆔 **User ID:** `{user.id}`"
 
-    if message.text:
-        admin_msg = await client.send_message(
-            chat_id=ADMIN_ID,
-            text=f"🚨 **Nayi Report Aayi!**\n\n{user_info}\n\n📝 **Report:**\n{message.text}"
+    if user.id == ADMIN_ID:
+        await message.reply_text(
+            "👑 **Admin Mode Active!**\n\n"
+            "Jab koi user message karega, yahan message aur details card aayega.\n"
+            "Aap bas us message par **Reply** karke direct user ko jawab bhej sakte hain."
         )
-    else:
-        caption = f"🚨 **Nayi Report Aayi!**\n\n{user_info}\n\n📝 **Caption:**\n{message.caption or 'No Caption'}"
-        admin_msg = await message.copy(chat_id=ADMIN_ID, caption=caption)
+        return
 
-    # Database mapping store karein
-    report_db[admin_msg.id] = user.id
+    caption_text = (
+        f"HEY 👨‍💻 {user.mention},\n\n"
+        f"I'M THE OWNER OF 💬 **HD PRO SEARCH BOT**\n\n"
+        f"👉 NEW MOVIES / SERIES BOTS DEKHNA HO TO NICHE DIYE GAYE BUTTON PE CLICK KARE 👇\n\n"
+        f"🔔 AEK SE BHI ZYADA FAST & ADVANCED MOVIE SEARCH BOTS AVAILABLE!"
+    )
 
-    await message.reply_text("✅ **Aapki report submit ho gayi hai!** Jald hi jawab diya jayega.")
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚡ Fast Movie Bots List ↗", url=BUTTON_URL)]
+    ])
+
+    try:
+        await message.reply_video(
+            video=START_VIDEO,
+            caption=caption_text,
+            reply_markup=buttons
+        )
+    except Exception:
+        await message.reply_text(
+            text=caption_text,
+            reply_markup=buttons
+        )
 
 
-# --- Admin Reply Handler (Admin -> User) ---
+# ================= 2. User Message (User -> Admin) ================= #
+@app.on_message(filters.private & ~filters.user(ADMIN_ID))
+async def user_to_admin(client: Client, message: Message):
+    user = message.from_user
+
+    # 1. User ka message Admin ko forward karein
+    fwd = await message.forward(ADMIN_ID)
+    msg_map[fwd.id] = user.id
+
+    # 2. Info card send karein
+    info_text = (
+        f"📢 **Message sent by {user.first_name}!!**\n"
+        f"`[{user.id}]` `[#id{user.id}]`\n\n"
+        f"👉 To answer, reply to this message."
+    )
+    
+    info_btn = InlineKeyboardMarkup([
+        [InlineKeyboardButton("👤 User profile", url=f"tg://user?id={user.id}")]
+    ])
+
+    info_msg = await client.send_message(
+        chat_id=ADMIN_ID,
+        text=info_text,
+        reply_markup=info_btn
+    )
+    msg_map[info_msg.id] = user.id
+
+    # 3. User ko confirmation reply karein
+    await message.reply_text("✅ Message sent!")
+
+
+# ================= 3. Admin Reply (Admin -> User) ================= #
 @app.on_message(filters.private & filters.user(ADMIN_ID) & filters.reply)
-async def handle_admin_reply(client: Client, message: Message):
+async def admin_to_user(client: Client, message: Message):
     replied_msg = message.reply_to_message
-    target_user_id = report_db.get(replied_msg.id)
+    target_user_id = msg_map.get(replied_msg.id)
 
-    # Restart fallback: Text/caption se User ID extract karna
+    # Fallback 1: Forward header check
+    if not target_user_id and replied_msg.forward_from:
+        target_user_id = replied_msg.forward_from.id
+
+    # Fallback 2: Regex se ID match karein (#id123456)
     if not target_user_id:
         text_content = replied_msg.text or replied_msg.caption or ""
-        match = re.search(r"User ID:\*\* `(\d+)`", text_content)
+        match = re.search(r"#id(\d+)", text_content)
         if match:
             target_user_id = int(match.group(1))
 
     if target_user_id:
         try:
-            if message.text:
-                await client.send_message(
-                    chat_id=target_user_id,
-                    text=f"📩 **Admin Response (Aapki Report Ka Jawab):**\n\n{message.text}"
-                )
-            else:
-                caption = f"📩 **Admin Response:**\n\n{message.caption or ''}"
-                await message.copy(chat_id=target_user_id, caption=caption)
-
-            await message.reply_text("✅ Reply successfully user ko bhej diya gaya!")
+            # User ko copy karke deliver karein
+            await message.copy(chat_id=target_user_id)
+            
+            # Admin msg par reaction
+            try:
+                await message.react("👍")
+            except Exception:
+                pass
         except Exception as e:
-            await message.reply_text(f"❌ Error: `{e}`")
+            await message.reply_text(f"❌ Send fail: `{e}`")
     else:
-        await message.reply_text("⚠️ Is message ka User ID nahi mila. Kripya user ki aayi hui report par hi reply karein.")
+        await message.reply_text("⚠️ User ID nahi mili. Forwarded message ya info card par reply karein.")
 
 
-print("Bot Start Ho Raha Hai...")
-app.run()
+# ================= 4. Web Server (Render Port Binding) ================= #
+async def web_handler(request):
+    return web.Response(text="Bot is running smoothly 24/7!")
+
+async def main():
+    server = web.Application()
+    server.router.add_get("/", web_handler)
+    server.router.add_head("/", web_handler)
+    runner = web.AppRunner(server)
+    await runner.setup()
+    
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"Web server active on port: {port}")
+
+    print("Bot Start Ho Raha Hai...")
+    await app.start()
+    print("Bot Live Hai!")
+
+    await asyncio.Event().wait()
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -360,8 +360,8 @@ async def admin_reply(client: Client, message: Message):
                 pass
         except (UserIsBlocked, InputUserDeactivated, UserDeactivated, UserDeactivatedBan):
             await message.reply_text(
-                "❌ **Message not sent!**\n"
-                "_The user blocked the bot or deleted the account._"
+                "❌ Message not sent!\n"
+                "The user blocked the bot or deleted the account."
             )
         except Exception as e:
             await message.reply_text(f"❌ Send fail: `{e}`")

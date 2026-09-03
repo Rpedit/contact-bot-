@@ -1,19 +1,35 @@
 import os
 import re
 import asyncio
+import logging
 from aiohttp import web
 from pyrogram import Client, filters, idle
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import (
+    Message,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    CallbackQuery,
+)
 from config import API_ID, API_HASH, BOT_TOKEN, ADMIN_ID, START_VIDEO, BUTTON_URL
+
+# Logging setup (isse terminal me error saaf dikhega)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
+
+# Ensure ADMIN_ID is integer
+ADMIN = int(ADMIN_ID)
 
 app = Client(
     "contact_relay_bot",
     api_id=API_ID,
     api_hash=API_HASH,
-    bot_token=BOT_TOKEN
+    bot_token=BOT_TOKEN,
 )
 
-# Admin chat message ID -> User ID mapping
+# Admin message ID -> User ID mapping
 msg_map = {}
 
 
@@ -39,91 +55,114 @@ async def start_handler(client: Client, message: Message):
         f"⚠️ **AEK SE BHI ZYADA FAST & ADVANCED MOVIE SEARCH BOTS AVAILABLE!**"
     )
 
-    user_buttons = InlineKeyboardMarkup([
-        [InlineKeyboardButton("⚡ Fast Movie Bots List ↗", url=BUTTON_URL)]
-    ])
+    user_buttons = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("⚡ Fast Movie Bots List ↗", url=BUTTON_URL)]]
+    )
 
-    # 1. Send Welcome Video / Animation
-    try:
-        await message.reply_video(
-            video=START_VIDEO,
-            caption=caption_text,
-            reply_markup=user_buttons
-        )
-    except Exception:
+    # Send Welcome Video / Animation / Text
+    sent = False
+    if START_VIDEO:
         try:
-            await message.reply_animation(
-                animation=START_VIDEO,
+            await message.reply_video(
+                video=START_VIDEO,
                 caption=caption_text,
-                reply_markup=user_buttons
+                reply_markup=user_buttons,
             )
-        except Exception:
-            await message.reply_text(
-                text=caption_text,
-                reply_markup=user_buttons
-            )
+            sent = True
+        except Exception as e:
+            logger.warning(f"Video send failed: {e}")
+            try:
+                await message.reply_animation(
+                    animation=START_VIDEO,
+                    caption=caption_text,
+                    reply_markup=user_buttons,
+                )
+                sent = True
+            except Exception as e:
+                logger.warning(f"Animation send failed: {e}")
 
-    # 2. Agar Admin ne /start kiya ho toh Admin Panel show karega
-    if user.id == ADMIN_ID:
+    if not sent:
+        await message.reply_text(
+            text=caption_text,
+            reply_markup=user_buttons,
+        )
+
+    # Admin Panel (Agar user khud Admin hai)
+    if user.id == ADMIN:
         admin_text = (
             "👆 This is the message your users will see.\n\n"
             "👇 This is the message you see as an administrator.\n\n"
             "👑 **You are the administrator of this bot!**"
         )
-        admin_buttons = InlineKeyboardMarkup([
+        admin_buttons = InlineKeyboardMarkup(
             [
-                InlineKeyboardButton("⚙️ Bot settings", callback_data="bot_settings"),
-                InlineKeyboardButton("🎧 Support ↗", url="https://t.me/your_support")
+                [
+                    InlineKeyboardButton("⚙️ Bot settings", callback_data="bot_settings"),
+                    InlineKeyboardButton("🎧 Support ↗", url=BUTTON_URL),
+                ]
             ]
-        ])
+        )
         await message.reply_text(
             text=admin_text,
-            reply_markup=admin_buttons
+            reply_markup=admin_buttons,
         )
 
 
-# ================= 2. User Message (User -> Admin) ================= #
-@app.on_message(filters.private & ~filters.user(ADMIN_ID))
+# ================= 2. Callback Query Handler ================= #
+@app.on_callback_query()
+async def callback_handler(client: Client, query: CallbackQuery):
+    if query.data == "bot_settings":
+        await query.answer("Bot is working properly! All settings are default.", show_alert=True)
+    else:
+        await query.answer()
+
+
+# ================= 3. User Message (User -> Admin) ================= #
+@app.on_message(filters.private & ~filters.user(ADMIN) & ~filters.command(["start", "help"]))
 async def user_to_admin(client: Client, message: Message):
     user = message.from_user
 
     # 1. Forward original message to Admin
-    fwd = await message.forward(ADMIN_ID)
-    msg_map[fwd.id] = user.id
+    try:
+        fwd = await message.forward(ADMIN)
+        msg_map[fwd.id] = user.id
+    except Exception as e:
+        logger.error(f"Forward failed: {e}")
+        return
 
-    # 2. Details Card for direct reference & fallback ID parsing
+    # 2. Details Card for Admin
     info_text = (
         f"📢 **Message sent by {user.first_name}**\n"
         f"`[{user.id}]` `[#id{user.id}]`\n\n"
         f"👉 Jawab dene ke liye is message par reply karein."
     )
-    info_btn = InlineKeyboardMarkup([
-        [InlineKeyboardButton("👤 User profile", url=f"tg://user?id={user.id}")]
-    ])
+    info_btn = InlineKeyboardMarkup(
+        [[InlineKeyboardButton("👤 User profile", url=f"tg://user?id={user.id}")]]
+    )
 
     info_msg = await client.send_message(
-        chat_id=ADMIN_ID,
+        chat_id=ADMIN,
         text=info_text,
-        reply_markup=info_btn
+        reply_markup=info_btn,
     )
     msg_map[info_msg.id] = user.id
 
-    # 3. User Confirmation (Popup style: aakar 3-4 second me delete)
+    # 3. User Temporary Confirmation (Auto-delete after 3 sec)
     confirm_msg = await message.reply_text("Message sent! ⏱️")
     asyncio.create_task(auto_delete_message(confirm_msg, delay=3))
 
 
-# ================= 3. Admin Reply (Admin -> User) ================= #
-@app.on_message(filters.private & filters.user(ADMIN_ID) & filters.reply)
+# ================= 4. Admin Reply (Admin -> User) ================= #
+@app.on_message(filters.private & filters.user(ADMIN) & filters.reply)
 async def admin_to_user(client: Client, message: Message):
     replied_msg = message.reply_to_message
     target_user_id = msg_map.get(replied_msg.id)
 
-    # Fallback 1: Agar forwarded message se direct user ID milti hai
+    # Fallback 1: Forward source
     if not target_user_id and replied_msg.forward_from:
         target_user_id = replied_msg.forward_from.id
 
-    # Fallback 2: Bot restart hone par card text se ID extract karega
+    # Fallback 2: Extract from text
     if not target_user_id:
         text_content = replied_msg.text or replied_msg.caption or ""
         match = re.search(r"#id(\d+)", text_content)
@@ -133,52 +172,51 @@ async def admin_to_user(client: Client, message: Message):
     if target_user_id:
         try:
             await message.copy(chat_id=target_user_id)
-            
-            # Message copy hone ke baad Admin reply par thumbs up reaction
             try:
                 await client.send_reaction(
-                    chat_id=ADMIN_ID,
+                    chat_id=ADMIN,
                     message_id=message.id,
-                    emoji="👍"
+                    emoji="👍",
                 )
             except Exception:
                 pass
         except Exception as e:
             await message.reply_text(f"❌ Send fail: `{e}`")
     else:
-        await message.reply_text("⚠️ User ID nahi mili! Forwarded message ya info card par reply karein.")
+        await message.reply_text("⚠️ User ID nahi mili. Message ya card par reply karein.")
 
 
-# ================= 4. Admin Normal Message Handler ================= #
-@app.on_message(filters.private & filters.user(ADMIN_ID) & ~filters.reply & ~filters.command("start"))
+# ================= 5. Admin Normal Message Handler ================= #
+@app.on_message(filters.private & filters.user(ADMIN) & ~filters.reply & ~filters.command(["start", "help"]))
 async def admin_normal_msg(client: Client, message: Message):
     await message.reply_text(
         "ℹ️ **Admin Alert:** Aap direct message kar rahe hain.\n\n"
-        "User ko jawab bhejne ke liye user ke forwarded message ya card par **Swipe karke Reply** karein."
+        "User ko jawab bhejne ke liye uske forwarded message ya info card par **Reply** karein."
     )
 
 
-# ================= 5. Web Server & Runner ================= #
+# ================= 6. Web Server & Runner ================= #
 async def web_handler(request):
     return web.Response(text="Bot is running active 24/7!")
 
 async def start_services():
-    # Render / VPS Web Keep-Alive Port
+    # Web keep-alive for Koyeb / Render
     server = web.Application()
     server.router.add_get("/", web_handler)
     runner = web.AppRunner(server)
     await runner.setup()
-    
+
     port = int(os.environ.get("PORT", 8080))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    print(f"Web server active on port {port}")
+    logger.info(f"Web server active on port {port}")
 
-    # Start Pyrogram Client
+    # Pyrogram start
     await app.start()
-    print("Bot Start Ho Gaya!")
+    logger.info("Pyrogram Client started successfully!")
     await idle()
     await app.stop()
 
 if __name__ == "__main__":
-    asyncio.run(start_services())
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(start_services())

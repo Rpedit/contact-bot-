@@ -87,15 +87,27 @@ def unban_user(user_id: int):
     conn.close()
 
 
-# ================= 2. Bot Instance ================= #
+# ================= 2. Bot Setup & Filters ================= #
 app = Client("support_contact_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 PRIVACY_TEXT = (
     "🔒 **Privacy & Data Policy**\n\n"
-    "• **Data Collected:** User ID, Name, aur Username sirf message relay service ke liye save kiya jata hai.\n"
+    "• **Data Collected:** User ID, Name, aur Username safe message relay provide karne ke liye store hota hai.\n"
     "• **Relay Function:** User ka message directly support admin tak deliver hota hai.\n"
-    "• **Security:** Aapka personal data kisi third-party ko share ya sell nahi kiya jata."
+    "• **Security:** Data kisi third-party ke sath share ya sell nahi kiya jata."
 )
+
+ADULT_REGEX = re.compile(
+    r"(?i)\b(porn|xxx|sex|sexy|adult|nude|nudes|nsfw|boobs|dick|pussy|hentai|erotic|"
+    r"xvideos|pornhub|xhamster|xnxx|brazzers|stripchat|onlyfans|chaturbate|redtube|"
+    r"spankbang|chut|gand|lund|chudai|bhosda|mms)\b|"
+    r"(https?:\/\/[^\s]*(xxx|porn|sex|xnxx|xvideos|adult)[^\s]*)"
+)
+
+def is_adult_content(text: str) -> bool:
+    if not text:
+        return False
+    return bool(ADULT_REGEX.search(text))
 
 async def auto_delete(msg: Message, delay: int = 3):
     await asyncio.sleep(delay)
@@ -103,6 +115,23 @@ async def auto_delete(msg: Message, delay: int = 3):
         await msg.delete()
     except Exception:
         pass
+
+def extract_target_user(message: Message) -> int | None:
+    if len(message.command) > 1 and message.command[1].isdigit():
+        return int(message.command[1])
+
+    if message.reply_to_message:
+        rep = message.reply_to_message
+        if rep.id in msg_map:
+            return msg_map[rep.id]
+        if rep.forward_from:
+            return rep.forward_from.id
+        raw_text = rep.text or rep.caption or ""
+        match = re.search(r"#id(\d+)", raw_text)
+        if match:
+            return int(match.group(1))
+
+    return None
 
 
 # ================= 3. Message Handlers ================= #
@@ -136,81 +165,137 @@ async def privacy_handler(client: Client, message: Message):
     await message.reply_text(PRIVACY_TEXT)
 
 
-@app.on_callback_query()
-async def callback_handler(client: Client, query: CallbackQuery):
-    if query.data == "show_privacy":
-        await query.message.reply_text(PRIVACY_TEXT)
-        await query.answer()
-    else:
-        await query.answer()
-
-
-# ================= 4. Admin Management Commands ================= #
+# ================= 4. Admin Commands ================= #
 @app.on_message(filters.command("stats") & filters.private & filters.user(OWNER_ID))
 async def stats_handler(client: Client, message: Message):
     users = get_all_users()
     await message.reply_text(
         f"📊 **Bot Analytics**\n\n"
         f"👑 **Admin:** `{OWNER_ID}`\n"
-        f"👥 **Total Users:** `{len(users)}`"
+        f"👥 **Total Registered Users:** `{len(users)}`"
     )
 
 
 @app.on_message(filters.command("broadcast") & filters.private & filters.user(OWNER_ID))
-async def broadcast_handler(client: Client, message: Message):
-    if not message.reply_to_message and len(message.command) < 2:
-        return await message.reply_text("⚠️ Message par reply karke `/broadcast` likhein ya text type karein.")
+async def broadcast_prompt(client: Client, message: Message):
+    if not message.reply_to_message:
+        return await message.reply_text(
+            "⚠️ **Format:** Jis message ko broadcast karna hai uspar reply karke `/broadcast` likhein."
+        )
 
-    users = get_all_users()
-    status = await message.reply_text(f"🚀 Broadcasting to `{len(users)}` users...")
-    success = 0
+    target_msg_id = message.reply_to_message.id
+    buttons = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📢 Normal Broadcast", callback_data=f"bcast_norm_{target_msg_id}"),
+            InlineKeyboardButton("📌 Broadcast & PIN", callback_data=f"bcast_pin_{target_msg_id}")
+        ],
+        [InlineKeyboardButton("❌ Cancel", callback_data="bcast_cancel")]
+    ])
 
-    for uid in users:
-        try:
-            if message.reply_to_message:
-                await message.reply_to_message.copy(chat_id=uid)
-            else:
-                await client.send_message(chat_id=uid, text=message.text.split(None, 1)[1])
-            success += 1
-            await asyncio.sleep(0.05)
-        except Exception:
-            pass
-
-    await status.edit_text(f"✅ **Broadcast Finished!** Delivered: `{success}/{len(users)}`")
+    await message.reply_text(
+        "📢 **Broadcast Confirmation:**\n\n"
+        "Aap is message ko normal bhejna chahte hain ya sabhi users ke chat me **PIN** bhi karna chahte hain?",
+        reply_markup=buttons
+    )
 
 
 @app.on_message(filters.command("ban") & filters.private & filters.user(OWNER_ID))
 async def ban_handler(client: Client, message: Message):
-    target = None
-    if len(message.command) > 1 and message.command[1].isdigit():
-        target = int(message.command[1])
-    elif message.reply_to_message and message.reply_to_message.id in msg_map:
-        target = msg_map[message.reply_to_message.id]
-
+    target = extract_target_user(message)
     if target:
         ban_user(target)
-        await message.reply_text(f"🚫 User `[{target}]` ko block/ban kar diya gaya.")
+        await message.reply_text(f"🚫 User `[{target}]` ko **Ban** kar diya gaya.")
     else:
-        await message.reply_text("⚠️ User ID dein ya forwarded card par reply karein.")
+        await message.reply_text("⚠️ User ke message ya card par reply karke `/ban` likhein ya ID dein.")
 
 
 @app.on_message(filters.command("unban") & filters.private & filters.user(OWNER_ID))
 async def unban_handler(client: Client, message: Message):
-    target = int(message.command[1]) if len(message.command) > 1 and message.command[1].isdigit() else None
+    target = extract_target_user(message)
     if target:
         unban_user(target)
-        await message.reply_text(f"✅ User `[{target}]` unban ho gaya.")
+        await message.reply_text(f"✅ User `[{target}]` ko **Unban** kar diya gaya.")
     else:
-        await message.reply_text("⚠️ Valid user ID enter karein: `/unban 123456789`")
+        await message.reply_text("⚠️ User ke message ya card par reply karke `/unban` likhein ya ID dein.")
 
 
-# ================= 5. Relay System (User <-> Admin) ================= #
+# ================= 5. Callback Queries ================= #
+@app.on_callback_query()
+async def callback_handler(client: Client, query: CallbackQuery):
+    data = query.data
+
+    if data == "show_privacy":
+        await query.message.reply_text(PRIVACY_TEXT)
+        return await query.answer()
+
+    if data == "bcast_cancel":
+        await query.message.delete()
+        return await query.answer("Broadcast cancel ho gaya.", show_alert=True)
+
+    if data.startswith("bcast_norm_") or data.startswith("bcast_pin_"):
+        should_pin = data.startswith("bcast_pin_")
+        target_msg_id = int(data.split("_")[-1])
+
+        await query.message.delete()
+        users = get_all_users()
+        status = await client.send_message(
+            chat_id=OWNER_ID,
+            text=f"🚀 Broadcasting message to `{len(users)}` users... (Pin: **{should_pin}**)"
+        )
+
+        success, pinned, failed = 0, 0, 0
+        for uid in users:
+            try:
+                sent = await client.copy_message(chat_id=uid, from_chat_id=OWNER_ID, message_id=target_msg_id)
+                success += 1
+                if should_pin:
+                    try:
+                        await client.pin_chat_message(chat_id=uid, message_id=sent.id, both_sides=True)
+                        pinned += 1
+                    except Exception:
+                        pass
+                await asyncio.sleep(0.05)
+            except Exception:
+                failed += 1
+
+        result_text = (
+            f"✅ **Broadcast Completed!**\n\n"
+            f"👥 **Total Users:** `{len(users)}`\n"
+            f"🟢 **Delivered:** `{success}`\n"
+            f"📌 **Pinned:** `{pinned}`\n"
+            f"🔴 **Failed:** `{failed}`"
+        )
+        await status.edit_text(result_text)
+        return await query.answer()
+
+    await query.answer()
+
+
+# ================= 6. Relay System (Public vs Private Detection) ================= #
 @app.on_message(filters.private & ~filters.user(OWNER_ID) & ~filters.command(["start", "privacy"]))
 async def user_to_admin(client: Client, message: Message):
     user = message.from_user
+
     if is_banned(user.id):
         notice = await message.reply_text("🚫 **Aapko is bot par block kiya gaya hai.**")
         return asyncio.create_task(auto_delete(notice, 4))
+
+    content_text = message.text or message.caption or ""
+    if is_adult_content(content_text):
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
+        warning_alert = await client.send_message(
+            chat_id=user.id,
+            text=(
+                "⚠️ **WARNING / चेतावनी!**\n\n"
+                "Adult / 18+ links ya gandi content bhejna strictly **BANNED** hai.\n"
+                "Aapka message delete kar diya gaya hai. Dobara karne par block kar diya jayega!"
+            )
+        )
+        return asyncio.create_task(auto_delete(warning_alert, delay=6))
 
     try:
         fwd = await message.forward(OWNER_ID)
@@ -218,29 +303,38 @@ async def user_to_admin(client: Client, message: Message):
     except Exception as e:
         return logger.error(f"Forward error: {e}")
 
-    info_text = (
-        f"📢 **Message from {user.first_name}!!**\n"
-        f"[{user.id}](tg://user?id={user.id}) #id{user.id}\n\n"
-        f"👉 Reply to this message to answer."
-    )
-    profile_url = f"https://t.me/{user.username}" if user.username else f"tg://openmessage?user_id={user.id}"
-    card = await client.send_message(
-        chat_id=OWNER_ID,
-        text=info_text,
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👤 User Profile", url=profile_url)]]),
-        disable_web_page_preview=True,
-    )
-    msg_map[card.id] = user.id
+    # AGAR ACCOUNT PRIVATE HAI (forward_from None hai) TABHI CARD AAYEGA:
+    if not fwd.forward_from:
+        info_text = (
+            f"📢 **Message from {user.first_name}!!**\n"
+            f"[{user.id}](tg://user?id={user.id}) #id{user.id}\n\n"
+            f"👉 Reply to this message to answer."
+        )
+        profile_url = f"https://t.me/{user.username}" if user.username else f"tg://openmessage?user_id={user.id}"
+        card = await client.send_message(
+            chat_id=OWNER_ID,
+            text=info_text,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("👤 User Profile", url=profile_url)]]),
+            disable_web_page_preview=True,
+        )
+        msg_map[card.id] = user.id
 
     confirm = await message.reply_text("Message sent! ⏱️")
     asyncio.create_task(auto_delete(confirm, 3))
 
 
+# --- Admin Reply to User ---
 @app.on_message(filters.private & filters.user(OWNER_ID) & filters.reply)
 async def admin_reply(client: Client, message: Message):
+    if message.text and message.text.startswith(("/ban", "/unban", "/broadcast", "/stats")):
+        return
+
     target = msg_map.get(message.reply_to_message.id)
-    if not target and message.reply_to_message.text:
-        match = re.search(r"#id(\d+)", message.reply_to_message.text)
+    if not target and message.reply_to_message.forward_from:
+        target = message.reply_to_message.forward_from.id
+    if not target:
+        raw_text = message.reply_to_message.text or message.reply_to_message.caption or ""
+        match = re.search(r"#id(\d+)", raw_text)
         if match:
             target = int(match.group(1))
 
@@ -254,9 +348,10 @@ async def admin_reply(client: Client, message: Message):
         except Exception as e:
             await message.reply_text(f"❌ Send fail: `{e}`")
     else:
-        await message.reply_text("⚠️ User ID nahi mili. User card ya forwarded message par reply karein.")
+        await message.reply_text("⚠️ User ID nahi mili. Message par reply karein.")
 
 
+# --- Non-Reply Alert ---
 @app.on_message(
     filters.private
     & filters.user(OWNER_ID)
@@ -268,9 +363,9 @@ async def no_reply_warning(client: Client, message: Message):
     asyncio.create_task(auto_delete(alert, delay=4))
 
 
-# ================= 6. Web Server & Lifecycle ================= #
+# ================= 7. Web Server & Lifecycle ================= #
 async def web_handler(request):
-    return web.Response(text="Support Relay Bot is Running 24/7!")
+    return web.Response(text="Support Relay Bot is Active 24/7!")
 
 async def main():
     server = web.Application()
@@ -288,12 +383,12 @@ async def main():
         scope=BotCommandScopeAllPrivateChats()
     )
 
-    # Admin: Private admin commands
+    # Admin commands list
     await app.set_bot_commands(
         [
             BotCommand("start", "🤖 Restart Bot"),
             BotCommand("stats", "📊 Live Stats"),
-            BotCommand("broadcast", "📢 Broadcast"),
+            BotCommand("broadcast", "📢 Broadcast with PIN"),
             BotCommand("ban", "🚫 Ban User"),
             BotCommand("unban", "✅ Unban User"),
             BotCommand("privacy", "🔒 Privacy Policy"),

@@ -124,8 +124,9 @@ async def web_handler(request):
 
 async def main():
     server = web.Application()
+    # aiohttp me add_get automatically HEAD requests bhi handle kar leta hai
     server.router.add_get("/", web_handler)
-    server.router.add_head("/", web_handler)
+    
     runner = web.AppRunner(server)
     await runner.setup()
     

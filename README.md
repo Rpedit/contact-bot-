@@ -1,15 +1,41 @@
-# Telegram Report & Support Bot
+# Telegram Support & Contact Relay Bot
 
-Ek simple aur efficient Telegram Relay Bot jahan users issues ya queries submit kar sakte hain aur Admin directly bot ke through unhe reply kar sakta hai.
+A fast, lightweight, and asynchronous Telegram Support and Contact Relay bot built with Python, Pyrogram v2, and SQLite.
 
-## Features
-- User reports and media support (Photos, Videos, Docs).
-- Admin reply forwarding.
-- Auto-extract User ID even after bot restarts.
-- Environment variables support for secure deployment.
+Developed and maintained by **#rpeditz_07** 🚀
 
-## Deploy Environment Variables
-- `API_ID`: Telegram API ID from my.telegram.org
-- `API_HASH`: Telegram API Hash from my.telegram.org
-- `BOT_TOKEN`: Bot Token from @BotFather
-- `ADMIN_ID`: Your Telegram numeric User ID
+---
+
+## ⚡ Features
+
+- **Direct Message Relay**: User messages are seamlessly forwarded to the bot owner's private chat.
+- **One-Click Reply**: Admin can reply directly to any user by swiping on forwarded cards.
+- **No External Database**: Powered completely by built-in `SQLite` (`bot.db`).
+- **Scoped Commands**: Clean interface for users (only `/start`), full moderation tools for the admin.
+- **Broadcasting Tool**: Send mass announcements to all registered users via `/broadcast`.
+- **User Moderation**: In-built `/ban` and `/unban` management.
+- **24/7 Keep-Alive**: Built-in `aiohttp` web server for uninterrupted hosting on Render, Koyeb, or VPS.
+
+---
+
+## 🛠️ Environment Variables (`config.py`)
+
+| Variable | Description |
+|---|---|
+| `API_ID` | Telegram App API ID from [my.telegram.org](https://my.telegram.org) |
+| `API_HASH` | Telegram App API Hash |
+| `BOT_TOKEN` | Bot token obtained from [@BotFather](https://t.me/BotFather) |
+| `ADMIN_ID` | Telegram User ID of the owner |
+| `START_VIDEO` | Direct link to welcome video/animation |
+| `BUTTON_URL` | Channel or support link |
+
+---
+
+## 🚀 Deployment
+
+### Local / VPS
+```bash
+git clone <your-repo-link>
+cd <repo-folder>
+pip install -r requirements.txt
+python bot.py

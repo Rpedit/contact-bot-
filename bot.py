@@ -366,7 +366,7 @@ async def admin_reply(client: Client, message: Message):
     & ~filters.command(["start", "privacy", "stats", "broadcast", "ban", "unban"])
 )
 async def no_reply_warning(client: Client, message: Message):
-    alert = await message.reply_text("⚠️ _Reply to a forwarded message to send a message to that user._")
+    alert = await message.reply_text("⚠️ Reply to a forwarded message to send a message to that user.")
     asyncio.create_task(auto_delete(alert, delay=4))
 
 

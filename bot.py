@@ -15,6 +15,12 @@ from pyrogram.types import (
     BotCommandScopeAllPrivateChats,
     BotCommandScopeChat,
 )
+from pyrogram.errors import (
+    UserIsBlocked,
+    InputUserDeactivated,
+    UserDeactivated,
+    UserDeactivatedBan,
+)
 from config import API_ID, API_HASH, BOT_TOKEN, ADMIN_ID, START_VIDEO, BUTTON_URL
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -352,6 +358,11 @@ async def admin_reply(client: Client, message: Message):
                 await client.send_reaction(chat_id=OWNER_ID, message_id=message.id, emoji="👍")
             except Exception:
                 pass
+        except (UserIsBlocked, InputUserDeactivated, UserDeactivated, UserDeactivatedBan):
+            await message.reply_text(
+                "❌ **Message not sent!**\n"
+                "_The user blocked the bot or deleted the account._"
+            )
         except Exception as e:
             await message.reply_text(f"❌ Send fail: `{e}`")
     else:

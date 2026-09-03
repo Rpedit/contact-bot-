@@ -315,7 +315,7 @@ async def user_to_admin(client: Client, message: Message):
     except Exception as e:
         return logger.error(f"Forward error: {e}")
 
-    # Agar account hidden hai (fwd.forward_from None hai) tabhi card aayega
+    # Agar account hidden hai (fwd.forward_from None hai) tabhi quote box card aayega
     if not fwd.forward_from:
         info_text = (
             f"👆 Message sent by {user.first_name}\n"
@@ -323,9 +323,11 @@ async def user_to_admin(client: Client, message: Message):
             f"👉 To answer, reply to this message."
         )
         try:
+            # reply_to_message_id lagane se screenshot jaisa quote box banega
             card = await client.send_message(
                 chat_id=OWNER_ID,
                 text=info_text,
+                reply_to_message_id=fwd.id,
                 disable_web_page_preview=True,
             )
             msg_map[card.id] = user.id
@@ -359,9 +361,10 @@ async def admin_reply(client: Client, message: Message):
             except Exception:
                 pass
         except (UserIsBlocked, InputUserDeactivated, UserDeactivated, UserDeactivatedBan):
+            # User block ya account deleted alert
             await message.reply_text(
-                "❌ Message not sent!\n"
-                "The user blocked the bot or deleted the account."
+                "❌ **Message not sent!**\n"
+                "_The user blocked the bot or deleted the account._"
             )
         except Exception as e:
             await message.reply_text(f"❌ Send fail: `{e}`")

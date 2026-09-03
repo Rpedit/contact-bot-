@@ -143,7 +143,7 @@ async def start_handler(client: Client, message: Message):
     save_user(user.id, user.first_name, user.username or "")
 
     caption_text = (
-        f"HEY 👤 [**{user.first_name}**](tg://user?id={user.id}),\n\n"
+        f"HEY 👤 [{user.first_name}](tg://user?id={user.id}),\n\n"
         f"Welcome to our **Support & Contact Bot**!\n\n"
         f"💬 Aap apna koi bhi message, sawaal ya suggestion yahan type karke bhej sakte hain."
     )
@@ -312,9 +312,9 @@ async def user_to_admin(client: Client, message: Message):
     # Card sirf tab aayega jab forward link NA ho AUR username bhi NA ho
     if not fwd.forward_from and not user.username:
         info_text = (
-            f"📢 **Message from {user.first_name}!!**\n"
+            f"👆 Message sent by {user.first_name}!!**\n"
             f"[{user.id}](tg://user?id={user.id}) #id{user.id}\n\n"
-            f"👉 Reply to this message to answer."
+            f"👉 To answer, reply to this message."
         )
         profile_url = f"tg://openmessage?user_id={user.id}"
         card = await client.send_message(

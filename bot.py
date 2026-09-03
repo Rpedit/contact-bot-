@@ -24,7 +24,7 @@ OWNER_ID = int(ADMIN_ID)
 DB_FILE = "bot.db"
 msg_map = {}
 
-# ================= 1. Local Database ================= #
+# ================= 1. Local Database (SQLite) ================= #
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -87,7 +87,7 @@ def unban_user(user_id: int):
     conn.close()
 
 
-# ================= 2. Bot Setup & Filters ================= #
+# ================= 2. Bot Instance & Filters ================= #
 app = Client("support_contact_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 PRIVACY_TEXT = (
@@ -97,6 +97,7 @@ PRIVACY_TEXT = (
     "• **Security:** Data kisi third-party ke sath share ya sell nahi kiya jata."
 )
 
+# Adult & 18+ Keywords / Domains Filter
 ADULT_REGEX = re.compile(
     r"(?i)\b(porn|xxx|sex|sexy|adult|nude|nudes|nsfw|boobs|dick|pussy|hentai|erotic|"
     r"xvideos|pornhub|xhamster|xnxx|brazzers|stripchat|onlyfans|chaturbate|redtube|"
@@ -117,6 +118,7 @@ async def auto_delete(msg: Message, delay: int = 3):
         pass
 
 def extract_target_user(message: Message) -> int | None:
+    """Command argument, reply, forward ya card text se target user ID nikalta hai"""
     if len(message.command) > 1 and message.command[1].isdigit():
         return int(message.command[1])
 
@@ -176,6 +178,7 @@ async def stats_handler(client: Client, message: Message):
     )
 
 
+# --- Broadcast with Interactive PIN Option ---
 @app.on_message(filters.command("broadcast") & filters.private & filters.user(OWNER_ID))
 async def broadcast_prompt(client: Client, message: Message):
     if not message.reply_to_message:
@@ -199,6 +202,7 @@ async def broadcast_prompt(client: Client, message: Message):
     )
 
 
+# --- Reply to Ban / Unban ---
 @app.on_message(filters.command("ban") & filters.private & filters.user(OWNER_ID))
 async def ban_handler(client: Client, message: Message):
     target = extract_target_user(message)
@@ -219,7 +223,7 @@ async def unban_handler(client: Client, message: Message):
         await message.reply_text("⚠️ User ke message ya card par reply karke `/unban` likhein ya ID dein.")
 
 
-# ================= 5. Callback Queries ================= #
+# ================= 5. Callback Queries (Broadcast & Privacy) ================= #
 @app.on_callback_query()
 async def callback_handler(client: Client, query: CallbackQuery):
     data = query.data
@@ -230,7 +234,7 @@ async def callback_handler(client: Client, query: CallbackQuery):
 
     if data == "bcast_cancel":
         await query.message.delete()
-        return await query.answer("Broadcast cancel ho gaya.", show_alert=True)
+        return await query.answer("Broadcast cancel kar diya gaya.", show_alert=True)
 
     if data.startswith("bcast_norm_") or data.startswith("bcast_pin_"):
         should_pin = data.startswith("bcast_pin_")
@@ -271,15 +275,17 @@ async def callback_handler(client: Client, query: CallbackQuery):
     await query.answer()
 
 
-# ================= 6. Relay System (Public vs Private Detection) ================= #
+# ================= 6. Relay System (Public vs Private Forward Detection) ================= #
 @app.on_message(filters.private & ~filters.user(OWNER_ID) & ~filters.command(["start", "privacy"]))
 async def user_to_admin(client: Client, message: Message):
     user = message.from_user
 
+    # Ban check
     if is_banned(user.id):
         notice = await message.reply_text("🚫 **Aapko is bot par block kiya gaya hai.**")
         return asyncio.create_task(auto_delete(notice, 4))
 
+    # Adult content / link filter
     content_text = message.text or message.caption or ""
     if is_adult_content(content_text):
         try:
@@ -303,7 +309,7 @@ async def user_to_admin(client: Client, message: Message):
     except Exception as e:
         return logger.error(f"Forward error: {e}")
 
-    # AGAR ACCOUNT PRIVATE HAI (forward_from None hai) TABHI CARD AAYEGA:
+    # AGAR ACCOUNT PRIVATE HAI (forward_from None hai) TABHI EXTRA CARD AAYEGA:
     if not fwd.forward_from:
         info_text = (
             f"📢 **Message from {user.first_name}!!**\n"
@@ -326,6 +332,7 @@ async def user_to_admin(client: Client, message: Message):
 # --- Admin Reply to User ---
 @app.on_message(filters.private & filters.user(OWNER_ID) & filters.reply)
 async def admin_reply(client: Client, message: Message):
+    # Ignore admin commands
     if message.text and message.text.startswith(("/ban", "/unban", "/broadcast", "/stats")):
         return
 
@@ -348,7 +355,7 @@ async def admin_reply(client: Client, message: Message):
         except Exception as e:
             await message.reply_text(f"❌ Send fail: `{e}`")
     else:
-        await message.reply_text("⚠️ User ID nahi mili. Message par reply karein.")
+        await message.reply_text("⚠️ User ID nahi mili. User card ya message par reply karein.")
 
 
 # --- Non-Reply Alert ---

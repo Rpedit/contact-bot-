@@ -16,6 +16,16 @@ app = Client(
 msg_map = {}
 
 
+# ================= Helper: Auto-Delete Message ================= #
+async def auto_delete_message(msg: Message, delay: int = 3):
+    """Message aane ke baad specified seconds me apne aap delete/remove ho jayega"""
+    await asyncio.sleep(delay)
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+
 # ================= 1. /start Handler ================= #
 @app.on_message(filters.command("start") & filters.private)
 async def start_handler(client: Client, message: Message):
@@ -80,8 +90,9 @@ async def user_to_admin(client: Client, message: Message):
     )
     msg_map[info_msg.id] = user.id
 
-    # 3. User Confirmation
-    await message.reply_text("✅ Message sent!")
+    # 3. User Confirmation (Aayega aur 3 second me auto-delete ho jayega)
+    confirm_msg = await message.reply_text("✅ Message sent!")
+    asyncio.create_task(auto_delete_message(confirm_msg, delay=3))
 
 
 # ================= 3. Admin Reply (Admin -> User) ================= #

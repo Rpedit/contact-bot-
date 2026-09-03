@@ -309,19 +309,22 @@ async def user_to_admin(client: Client, message: Message):
     except Exception as e:
         return logger.error(f"Forward error: {e}")
 
-    # Agar user ka username NA ho AUR unka direct forward link bhi NA ho
-    if not fwd.forward_from and not user.username:
+    # Agar account hidden hai (fwd.forward_from None hai) tabhi card aayega
+    if not fwd.forward_from:
         info_text = (
-            f"👆 Message sent by {user.first_name} [{user.id}](tg://user?id={user.id}) #id{user.id}\n"
+            f"👆 Message sent by {user.first_name}\n"
+            f"[{user.id}](tg://user?id={user.id}) #id{user.id}\n"
             f"👉 To answer, reply to this message."
         )
-        card = await client.send_message(
-            chat_id=OWNER_ID,
-            text=info_text,
-            reply_to_message_id=fwd.id,
-            disable_web_page_preview=True,
-        )
-        msg_map[card.id] = user.id
+        try:
+            card = await client.send_message(
+                chat_id=OWNER_ID,
+                text=info_text,
+                disable_web_page_preview=True,
+            )
+            msg_map[card.id] = user.id
+        except Exception as e:
+            logger.error(f"Card error: {e}")
 
     confirm = await message.reply_text("Message sent! ⏱️")
     asyncio.create_task(auto_delete(confirm, 3))

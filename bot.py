@@ -331,15 +331,17 @@ async def user_to_admin(client: Client, message: Message):
             [InlineKeyboardButton("👤 User profile", url=profile_url)]
         ])
 
-        # Name aur ID dono par tg://user link laga hai taaki dono green display hon
         safe_name = html.escape(user.first_name or "User")
+        
+        # Name aur [ID] dono click karne par direct user ki profile kholenge
         info_text = (
-            f'👆 Message sent by <a href="tg://user?id={user.id}">{safe_name}</a>\n'
-            f'<a href="tg://user?id={user.id}">[{user.id}]</a> #id{user.id}\n'
+            f'👆 Message sent by <a href="{profile_url}">{safe_name}</a>\n'
+            f'<a href="{profile_url}">[{user.id}]</a> #id{user.id}\n'
             f'👉 To answer, reply to this message.'
         )
 
         try:
+            # reply_to_message_id lagane se screenshot jaisa quote box (with sender name) banega
             card = await client.send_message(
                 chat_id=OWNER_ID,
                 text=info_text,

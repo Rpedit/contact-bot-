@@ -323,7 +323,7 @@ async def user_to_admin(client: Client, message: Message):
         ])
 
         info_text = (
-            f"👆 Message sent by {user.first_name}\n"
+            f"👆 Message sent by [{user.first_name}](tg://user?id={user.id})\n"
             f"[{user.id}](tg://user?id={user.id}) #id{user.id}\n"
             f"👉 To answer, reply to this message."
         )
@@ -366,6 +366,11 @@ async def admin_reply(client: Client, message: Message):
                 await client.send_reaction(chat_id=OWNER_ID, message_id=message.id, emoji="👍")
             except Exception:
                 pass
+
+            # Admin ke message par bhi sent alert aayega aur 3s me delete ho jayega
+            confirm = await message.reply_text("Message sent! ⏱️")
+            asyncio.create_task(auto_delete(confirm, 3))
+
         except (UserIsBlocked, InputUserDeactivated, UserDeactivated, UserDeactivatedBan):
             await message.reply_text(
                 "❌ Message not sent!\n"

@@ -332,16 +332,15 @@ async def user_to_admin(client: Client, message: Message):
         ])
 
         safe_name = html.escape(user.first_name or "User")
-        
-        # Name aur [ID] dono click karne par direct user ki profile kholenge
+
+        # Exact screenshot matching: koi extra empty line nahi, #id hashtag banega
         info_text = (
-            f'👆 Message sent by <a href="{profile_url}">{safe_name}</a>\n'
-            f'<a href="{profile_url}">[{user.id}]</a> #id{user.id}\n'
-            f'👉 To answer, reply to this message.'
+            f"👆 Message sent by {safe_name}\n"
+            f"[{user.id}] #id{user.id}\n"
+            f"👉 <i>To answer, reply to this message.</i>"
         )
 
         try:
-            # reply_to_message_id lagane se screenshot jaisa quote box (with sender name) banega
             card = await client.send_message(
                 chat_id=OWNER_ID,
                 text=info_text,

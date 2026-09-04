@@ -331,12 +331,12 @@ async def user_to_admin(client: Client, message: Message):
             [InlineKeyboardButton("👤 User profile", url=profile_url)]
         ])
 
-        # Screenshot jaisa exact formatting: Name plain aur ID bracket ke andar GREEN link
+        # Name aur ID dono par tg://user link laga hai taaki dono green display hon
         safe_name = html.escape(user.first_name or "User")
         info_text = (
-            f"👆 Message sent by {safe_name}\n"
-            f"<a href=\"tg://user?id={user.id}\">[{user.id}]</a> #id{user.id}\n"
-            f"👉 To answer, reply to this message."
+            f'👆 Message sent by <a href="tg://user?id={user.id}">{safe_name}</a>\n'
+            f'<a href="tg://user?id={user.id}">[{user.id}]</a> #id{user.id}\n'
+            f'👉 To answer, reply to this message.'
         )
 
         try:

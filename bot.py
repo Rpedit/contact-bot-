@@ -315,20 +315,26 @@ async def user_to_admin(client: Client, message: Message):
     except Exception as e:
         return logger.error(f"Forward error: {e}")
 
-    # Agar account hidden hai (fwd.forward_from None hai) tabhi quote box card aayega
+    # Sirf forward-hidden / private users par card aur button aayega
     if not fwd.forward_from:
+        profile_url = f"https://t.me/{user.username}" if user.username else f"tg://user?id={user.id}"
+        profile_button = InlineKeyboardMarkup([
+            [InlineKeyboardButton("👤 User profile", url=profile_url)]
+        ])
+
         info_text = (
             f"👆 Message sent by {user.first_name}\n"
             f"[{user.id}](tg://user?id={user.id}) #id{user.id}\n"
             f"👉 To answer, reply to this message."
         )
+
         try:
-            # reply_to_message_id lagane se screenshot jaisa quote box banega
             card = await client.send_message(
                 chat_id=OWNER_ID,
                 text=info_text,
                 reply_to_message_id=fwd.id,
                 disable_web_page_preview=True,
+                reply_markup=profile_button,
             )
             msg_map[card.id] = user.id
         except Exception as e:
@@ -361,7 +367,6 @@ async def admin_reply(client: Client, message: Message):
             except Exception:
                 pass
         except (UserIsBlocked, InputUserDeactivated, UserDeactivated, UserDeactivatedBan):
-            # User block ya account deleted alert
             await message.reply_text(
                 "❌ Message not sent!\n"
                 "The user blocked the bot or deleted the account."

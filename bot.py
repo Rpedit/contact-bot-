@@ -1,5 +1,6 @@
 import os
 import re
+import html
 import sqlite3
 import asyncio
 import logging
@@ -21,6 +22,14 @@ from pyrogram.errors import (
     UserDeactivated,
     UserDeactivatedBan,
 )
+
+try:
+    from pyrogram.enums import ParseMode
+except ImportError:
+    class ParseMode:
+        HTML = "html"
+        MARKDOWN = "markdown"
+
 from config import API_ID, API_HASH, BOT_TOKEN, ADMIN_ID, START_VIDEO, BUTTON_URL
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -322,9 +331,11 @@ async def user_to_admin(client: Client, message: Message):
             [InlineKeyboardButton("👤 User profile", url=profile_url)]
         ])
 
+        # Screenshot jaisa exact formatting: Name plain aur ID bracket ke andar GREEN link
+        safe_name = html.escape(user.first_name or "User")
         info_text = (
-            f"👆 Message sent by [{user.first_name}](tg://user?id={user.id})\n"
-            f"[{user.id}](tg://user?id={user.id}) #id{user.id}\n"
+            f"👆 Message sent by {safe_name}\n"
+            f"<a href=\"tg://user?id={user.id}\">[{user.id}]</a> #id{user.id}\n"
             f"👉 To answer, reply to this message."
         )
 
@@ -335,6 +346,7 @@ async def user_to_admin(client: Client, message: Message):
                 reply_to_message_id=fwd.id,
                 disable_web_page_preview=True,
                 reply_markup=profile_button,
+                parse_mode=ParseMode.HTML,
             )
             msg_map[card.id] = user.id
         except Exception as e:
@@ -367,7 +379,6 @@ async def admin_reply(client: Client, message: Message):
             except Exception:
                 pass
 
-            # Admin ke message par bhi sent alert aayega aur 3s me delete ho jayega
             confirm = await message.reply_text("Message sent! ⏱️")
             asyncio.create_task(auto_delete(confirm, 3))
 

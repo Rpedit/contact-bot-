@@ -326,14 +326,20 @@ async def user_to_admin(client: Client, message: Message):
 
     # Sirf forward-hidden / private users par card aur button aayega
     if not fwd.forward_from:
-        profile_url = f"https://t.me/{user.username}" if user.username else f"tg://user?id={user.id}"
+        # User ka username ho to direct t.me link (jaise https://t.me/IfwebeingRL), warna tg link
+        if user.username:
+            clean_username = user.username.lstrip("@")
+            profile_url = f"https://t.me/{clean_username}"
+        else:
+            profile_url = f"tg://user?id={user.id}"
+
         profile_button = InlineKeyboardMarkup([
             [InlineKeyboardButton("👤 User profile", url=profile_url)]
         ])
 
         safe_name = html.escape(user.first_name or "User")
 
-        # Exact screenshot matching: koi extra empty line nahi, #id hashtag banega
+        # Exact screenshot matching: clean layout, no extra lines, auto-colored #id hashtag
         info_text = (
             f"👆 Message sent by {safe_name}\n"
             f"[{user.id}] #id{user.id}\n"
